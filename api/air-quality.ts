@@ -1,4 +1,4 @@
-import { getAQIData } from '../server/adapters';
+import { getAQIData } from './_lib/adapters';
 
 export default async function handler(req: any, res: any) {
   try {

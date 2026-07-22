@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Alert, CryptoCoin, WeatherInfo, CurrencyPair, AQIMeasurement } from '../src/types';
+import type { Alert, CryptoCoin, WeatherInfo, CurrencyPair, AQIMeasurement } from './types';
 
 // In-memory store for active alerts
 export const alertsList: Alert[] = [];
@@ -51,7 +51,6 @@ export function evaluateRules(
   isInitial = false
 ) {
   // 1. Evaluate Crypto Prices
-  // Rule: Price change absolute 24h percentage >= 3%
   crypto.forEach(coin => {
     const stateKey = `crypto-${coin.id}`;
     const previousState = activeStateMap.get(stateKey) || 'normal';
@@ -61,7 +60,6 @@ export function evaluateRules(
       if (previousState !== 'triggered') {
         activeStateMap.set(stateKey, 'triggered');
         
-        // Generate alert
         const changeDirection = coin.change24h >= 0 ? 'jumped' : 'dropped';
         const finalPrice = coin.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         const changePercent = Math.abs(coin.change24h).toFixed(1);
@@ -82,7 +80,6 @@ export function evaluateRules(
           }
         };
 
-        // If it's initial startup, we append to seed without firing dynamic broadcast triggers
         if (isInitial) {
           alertsList.push(alert);
         } else {
@@ -97,7 +94,6 @@ export function evaluateRules(
   });
 
   // 2. Evaluate Air Quality Index
-  // Rule: AQI crosses into unhealthy range (> 100)
   aqi.forEach(cityData => {
     const stateKey = `aqi-${cityData.city}`;
     const previousState = activeStateMap.get(stateKey) || 'normal';
@@ -137,11 +133,9 @@ export function evaluateRules(
   });
 
   // 3. Evaluate Weather Precipitation
-  // Rule: Precipitation / Weather code >= 61 (Heavy rain/storms)
   weather.forEach(cityWeather => {
     const stateKey = `weather-${cityWeather.city}`;
     const previousState = activeStateMap.get(stateKey) || 'normal';
-    // weatherCode >= 61 represents Rainy, Showers, Snow, or Storms
     const isTriggered = cityWeather.weatherCode >= 61;
 
     if (isTriggered) {
@@ -178,7 +172,6 @@ export function evaluateRules(
   });
 
   // 4. Evaluate Foreign Exchange Rates
-  // Rule: Rate change absolute 24h percentage >= 1.0%
   currency.forEach(pair => {
     const stateKey = `currency-${pair.id}`;
     const previousState = activeStateMap.get(stateKey) || 'normal';
@@ -238,10 +231,8 @@ export async function seedInitialAlerts(
       getAQI()
     ]);
 
-    // Force active triggering on first evaluation for seeding
     evaluateRules(crypto.data, weather.data, currency.data, aqi.data, true);
 
-    // If list is empty (no naturally triggering conditions), inject high-fidelity fallback items
     if (alertsList.length === 0) {
       alertsList.push(
         {
@@ -250,7 +241,7 @@ export async function seedInitialAlerts(
           severity: 'needs-attention',
           headline: 'Bitcoin jumped 3.4% past $92,450',
           detail: 'Bullish momentum drives BTC to a new local high with trading volume surging over 140%.',
-          createdAt: new Date(Date.now() - 12 * 60 * 1000).toISOString(), // 12m ago
+          createdAt: new Date(Date.now() - 12 * 60 * 1000).toISOString(),
           icon: 'coin-stack',
           sourceEvent: { metric: 'price_change', value: 92450.25, targetEntity: 'bitcoin' }
         },
@@ -260,7 +251,7 @@ export async function seedInitialAlerts(
           severity: 'needs-attention',
           headline: 'Air quality in London is unhealthy for sensitive groups',
           detail: 'The local index reached 131 AQI. Children and elderly should limit outdoor exertion.',
-          createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2h ago
+          createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
           icon: 'wind',
           sourceEvent: { metric: 'aqi_level', value: 131, targetEntity: 'London' }
         },
@@ -270,7 +261,7 @@ export async function seedInitialAlerts(
           severity: 'needs-attention',
           headline: 'Heavy rainfall warning issued for Tokyo',
           detail: 'Precipitation is expected to exceed 12mm/h starting at 18:00 UTC.',
-          createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(), // 5h ago
+          createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
           icon: 'cloud-sun',
           sourceEvent: { metric: 'precipitation', value: 61, targetEntity: 'Tokyo' }
         },
@@ -280,7 +271,7 @@ export async function seedInitialAlerts(
           severity: 'fyi',
           headline: 'US dollar strengthened by 1.2% against the euro',
           detail: 'The exchange index rose to 0.941 EUR, reflecting strong greenback strength.',
-          createdAt: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(), // 4h ago
+          createdAt: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
           icon: 'currency',
           sourceEvent: { metric: 'exchange_rate', value: 0.941, targetEntity: 'USD_EUR' }
         }

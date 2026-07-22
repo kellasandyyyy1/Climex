@@ -1,4 +1,4 @@
-import { getWeatherData } from '../server/adapters';
+import { getWeatherData } from './_lib/adapters';
 
 export default async function handler(req: any, res: any) {
   try {

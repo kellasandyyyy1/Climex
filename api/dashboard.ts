@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { getCryptoData, getWeatherData, getCurrencyData, getAQIData, getCountriesData } from '../server/adapters';
+import { getCryptoData, getWeatherData, getCurrencyData, getAQIData, getCountriesData } from './_lib/adapters';
 
 export default async function handler(req: any, res: any) {
   try {

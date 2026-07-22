@@ -1,4 +1,4 @@
-import { getCountriesData } from '../server/adapters';
+import { getCountriesData } from './_lib/adapters';
 
 export default async function handler(req: any, res: any) {
   try {

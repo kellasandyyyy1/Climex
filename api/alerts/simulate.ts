@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { addAlert } from '../../server/alertsEngine';
-import { Alert } from '../../src/types';
+import { addAlert } from '../_lib/alertsEngine';
+import type { Alert } from '../_lib/types';
 
 export default async function handler(req: any, res: any) {
   if (req.method !== 'POST') {
