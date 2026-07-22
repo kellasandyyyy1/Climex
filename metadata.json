@@ -1,0 +1,6 @@
+{
+  "name": "Climex",
+  "description": "A live, beautifully crafted analytics dashboard aggregating crypto, weather, currency, air quality, and country data using a warm cream/gold bento-grid design system with persistent state, dark mode, and real-time cache.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

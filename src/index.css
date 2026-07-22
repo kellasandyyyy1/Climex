@@ -1,0 +1,177 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+:root {
+  --font-sans: 'Inter', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Basic tokens */
+  --bg-base: #F4F1EA;          /* --surface-0 (page background) */
+  --surface: #FFFFFF;          /* --surface-1 (card background) */
+  --surface-muted: #EAE6DB;    /* --surface-2 (elevated/panel background) */
+  
+  --ink: #141414;              /* --text-primary (dark charcoal/black) */
+  --ink-soft: #44413A;         /* --text-secondary (dark slate/gray) */
+  --text-muted: #6E6A60;       /* --text-muted (caption/muted labels - meets WCAG 4.5:1 on white) */
+  
+  --line: #DFDAD0;             /* --border */
+  --border-strong: #9C968A;    /* --border-strong */
+
+  /* Status Colors: Saturated and dark for light mode (text) */
+  --text-success: #1E4E23;     /* deep green */
+  --text-danger: #822216;      /* deep red */
+  --text-warning: #704705;     /* deep amber/gold */
+  --text-accent: #0D3E54;      /* deep teal/blue */
+
+  /* Status Fills: Pale tint backgrounds for light mode */
+  --bg-success-subtle: #EDF7EE;
+  --bg-danger-subtle: #FDF1EF;
+  --bg-warning-subtle: #FEF8E7;
+  --bg-accent-subtle: #E6F3F7;
+
+  /* Base decorative colors */
+  --accent: #EFA83C;
+  --accent-soft: #FDEED6;
+  --success: #3A8341;
+  --danger: #B93C2A;
+  --purple: #634FB4;
+  --orange: #C25B12;
+  --blue: #225FA7;
+  --bg-glow: radial-gradient(circle at top right, #FCEBC0 0%, transparent 70%);
+}
+
+.dark {
+  /* Basic tokens */
+  --bg-base: #141311;          /* --surface-0 (page background) */
+  --surface: #1E1D19;          /* --surface-1 (card background) */
+  --surface-muted: #262520;    /* --surface-2 (elevated/panel background) */
+  
+  --ink: #F4F1EA;              /* --text-primary (light off-white) */
+  --ink-soft: #C2BFB6;         /* --text-secondary (light slate/gray) */
+  --text-muted: #918E84;       /* --text-muted (muted labels/captions) */
+  
+  --line: #312F29;             /* --border */
+  --border-strong: #545147;    /* --border-strong */
+
+  /* Status Colors: Saturated and light for dark mode (text) */
+  --text-success: #8FCB93;     /* light green */
+  --text-danger: #E28E7E;      /* light red */
+  --text-warning: #F5D375;     /* light amber/gold */
+  --text-accent: #6AC2D4;      /* light teal/blue */
+
+  /* Status Fills: Deep tint backgrounds for dark mode */
+  --bg-success-subtle: #192E1C;
+  --bg-danger-subtle: #371E19;
+  --bg-warning-subtle: #352B11;
+  --bg-accent-subtle: #12282E;
+
+  /* Base decorative colors */
+  --accent: #EFA83C;
+  --accent-soft: #3A311A;
+  --success: #8FCB93;
+  --danger: #E28E7E;
+  --purple: #9A89D6;
+  --orange: #D38545;
+  --blue: #729BCB;
+  --bg-glow: radial-gradient(circle at top right, #3A2F14 0%, transparent 70%);
+}
+
+@theme {
+  --font-sans: var(--font-sans);
+  --font-body: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  --color-text-primary: var(--ink);
+  --color-text-secondary: var(--ink-soft);
+  --color-text-muted: var(--text-muted);
+
+  --color-surface-0: var(--bg-base);
+  --color-surface-1: var(--surface);
+  --color-surface-2: var(--surface-muted);
+
+  --color-border-hairline: var(--line);
+  --color-border-strong: var(--border-strong);
+
+  --color-status-success: var(--text-success);
+  --color-status-danger: var(--text-danger);
+  --color-status-warning: var(--text-warning);
+  --color-status-accent: var(--text-accent);
+
+  --color-status-success-bg: var(--bg-success-subtle);
+  --color-status-danger-bg: var(--bg-danger-subtle);
+  --color-status-warning-bg: var(--bg-warning-subtle);
+  --color-status-accent-bg: var(--bg-accent-subtle);
+
+  /* Retain and align existing colors for complete theme safety */
+  --color-bg-base: var(--bg-base);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-ink: var(--ink);
+  --color-ink-soft: var(--ink-soft);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-line: var(--line);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+  --color-purple: var(--purple);
+  --color-orange: var(--orange);
+  --color-blue: var(--blue);
+}
+
+body, h1, h2, h3, h4, h5, h6, .heading, .title, button {
+  font-family: var(--font-sans);
+}
+
+.label, .mono-text, th, .badge, .ticker, .timestamp, .font-mono {
+  font-family: var(--font-mono);
+  letter-spacing: 0.03em;
+}
+
+.stat-value, .number, .price, .tabular-nums, td, [class*="tabular-nums"], .font-mono {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom visual utilities to match reference design */
+.diagonal-hatch {
+  background-image: linear-gradient(45deg, var(--accent) 25%, transparent 25%, transparent 50%, var(--accent) 50%, var(--accent) 75%, transparent 75%, transparent);
+  background-size: 16px 16px;
+}
+
+body {
+  background-color: var(--bg-base);
+  color: var(--ink);
+  font-family: var(--font-body);
+  transition: background-color 0.2s ease, color 0.2s ease;
+  min-height: 100vh;
+}
+
+/* Custom glow effect */
+.ambient-glow {
+  background: var(--bg-glow);
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 50vw;
+  height: 50vw;
+  max-width: 600px;
+  max-height: 600px;
+  opacity: 0.8;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Animations */
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
