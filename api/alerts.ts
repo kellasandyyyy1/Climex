@@ -3,8 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { getCryptoData, getWeatherData, getCurrencyData, getAQIData } from './_lib/adapters';
-import { alertsList, evaluateRules, seedInitialAlerts } from './_lib/alertsEngine';
+import { getCryptoData, getWeatherData, getCurrencyData, getAQIData } from './_lib/adapters.js';
+import { alertsList, evaluateRules, seedInitialAlerts } from './_lib/alertsEngine.js';
 
 let seeded = false;
 

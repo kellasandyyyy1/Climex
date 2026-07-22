@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { CryptoCoin, WeatherInfo, CurrencyPair, AQIMeasurement, CountryStat, DataSyncStatus } from '../src/types';
+import type { CryptoCoin, WeatherInfo, CurrencyPair, AQIMeasurement, CountryStat, DataSyncStatus } from '../../src/types';
 import {
   COINGECKO_COINS,
   MONITORED_CITIES,
@@ -16,7 +16,7 @@ import {
   generateMockCurrency,
   generateMockAQI,
   generateMockCountries
-} from '../src/lib/config';
+} from '../../src/lib/config.js';
 
 // Server cache storage helper
 export class ServerCache {
@@ -58,7 +58,6 @@ export async function getCryptoData(): Promise<{ data: CryptoCoin[]; status: 'on
     const ids = COINGECKO_COINS.map(c => c.id).join(',');
     const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${ids}&price_change_percentage=24h`;
     
-    // Fetch with 4s timeout
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 4000);
     
@@ -83,7 +82,6 @@ export async function getCryptoData(): Promise<{ data: CryptoCoin[]; status: 'on
       const marketCap = match ? match.market_cap : 1800000000000 / (index + 1);
       const volume24h = match ? match.total_volume : 28000000000 / (index + 1);
       
-      // Generate realistic sparkline values around current price
       const sparkline: number[] = [];
       for (let i = 0; i < 24; i++) {
         sparkline.push(price * (1 + Math.sin(timeSeed + i * 0.5 + index) * 0.015));
@@ -97,13 +95,12 @@ export async function getCryptoData(): Promise<{ data: CryptoCoin[]; status: 'on
         change24h,
         marketCap,
         volume24h,
-        rank: index + 1, // temporary, will be overwritten by sorted index
+        rank: index + 1,
         sparkline,
         tags: config.tags
       };
     });
 
-    // Sort by marketCap descending to assign sequential, non-duplicate ranks
     const data: CryptoCoin[] = [...unsortedData]
       .sort((a, b) => b.marketCap - a.marketCap)
       .map((coin, index) => ({
@@ -115,7 +112,6 @@ export async function getCryptoData(): Promise<{ data: CryptoCoin[]; status: 'on
     return { data, status: 'online' };
   } catch (err) {
     console.warn('Crypto Adapter falling back to mock data:', err instanceof Error ? err.message : err);
-    // Graceful fallback with incremental update using current seconds timestamp
     const seed = Date.now() / 10000;
     const fallbackData = generateMockCrypto(seed);
     const cached = serverCacheInstance.get<CryptoCoin[]>(cacheKey);
@@ -123,7 +119,7 @@ export async function getCryptoData(): Promise<{ data: CryptoCoin[]; status: 'on
     if (cached) {
       return { data: cached, status: 'stale' };
     }
-    serverCacheInstance.set(cacheKey, fallbackData, 10000); // 10s short cache for fallback
+    serverCacheInstance.set(cacheKey, fallbackData, 10000);
     return { data: fallbackData, status: 'offline' };
   }
 }
@@ -131,7 +127,7 @@ export async function getCryptoData(): Promise<{ data: CryptoCoin[]; status: 'on
 // 2. Open-Meteo Weather Adapter
 export async function getWeatherData(): Promise<{ data: WeatherInfo[]; status: 'online' | 'stale' | 'offline' }> {
   const cacheKey = 'weather_data';
-  const ttl = 10 * 60 * 1000; // 10 minutes cache
+  const ttl = 10 * 60 * 1000;
 
   if (!serverCacheInstance.isStale(cacheKey)) {
     return { data: serverCacheInstance.get<WeatherInfo[]>(cacheKey)!, status: 'online' };
@@ -181,7 +177,6 @@ export async function getWeatherData(): Promise<{ data: WeatherInfo[]; status: '
         };
       });
 
-      // Fill in forecasts if empty
       if (forecast.length === 0) {
         for (let i = 0; i < 7; i++) {
           const dayName = daysOfWeek[(new Date().getDay() + i) % 7];
@@ -232,7 +227,7 @@ export async function getWeatherData(): Promise<{ data: WeatherInfo[]; status: '
 // 3. Frankfurter Currency Adapter
 export async function getCurrencyData(): Promise<{ data: CurrencyPair[]; status: 'online' | 'stale' | 'offline' }> {
   const cacheKey = 'currency_data';
-  const ttl = 60 * 60 * 1000; // 1 hour cache
+  const ttl = 60 * 60 * 1000;
 
   if (!serverCacheInstance.isStale(cacheKey)) {
     return { data: serverCacheInstance.get<CurrencyPair[]>(cacheKey)!, status: 'online' };
@@ -298,16 +293,13 @@ export async function getCurrencyData(): Promise<{ data: CurrencyPair[]; status:
 // 4. OpenAQ Air Quality Adapter
 export async function getAQIData(): Promise<{ data: AQIMeasurement[]; status: 'online' | 'stale' | 'offline' }> {
   const cacheKey = 'aqi_data';
-  const ttl = 15 * 60 * 1000; // 15 minutes cache
+  const ttl = 15 * 60 * 1000;
 
   if (!serverCacheInstance.isStale(cacheKey)) {
     return { data: serverCacheInstance.get<AQIMeasurement[]>(cacheKey)!, status: 'online' };
   }
 
-  // Air quality endpoints are often rate limited or down, so we use a high-quality real attempt,
-  // falling back immediately to live mock generator.
   try {
-    // OpenAQ v2 Measurements
     const url = 'https://api.openaq.org/v2/measurements?limit=10&parameter=pm25';
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 2000);
@@ -318,12 +310,10 @@ export async function getAQIData(): Promise<{ data: AQIMeasurement[]; status: 'o
     if (!response.ok) {
       throw new Error('OpenAQ not responding');
     }
-    // We parse and check, but to ensure high visual precision, we layer it over our base monitored cities.
     const rawData = await response.json();
     const results = rawData.results || [];
 
     const data: AQIMeasurement[] = MONITORED_CITIES.map((cityObj, index) => {
-      // Find matching coordinates if possible
       const match = results.find((r: any) => r.city?.toLowerCase() === cityObj.city.toLowerCase()) || results[index];
       const baseVal = match ? Math.floor(match.value * 2) : Math.floor(45 + Math.sin(index) * 30);
       const aqiVal = Math.max(12, Math.min(350, baseVal));
@@ -336,7 +326,6 @@ export async function getAQIData(): Promise<{ data: AQIMeasurement[]; status: 'o
       const so2 = Number((aqiVal * 0.07).toFixed(1));
       const co = Number((aqiVal * 0.007).toFixed(2));
 
-      // Generate 24 hours historical trend
       const trend: { time: string; aqi: number }[] = [];
       const now = new Date();
       for (let i = 24; i >= 0; i--) {
@@ -371,7 +360,6 @@ export async function getAQIData(): Promise<{ data: AQIMeasurement[]; status: 'o
     serverCacheInstance.set(cacheKey, data, ttl);
     return { data, status: 'online' };
   } catch (err) {
-    // Graceful fallback
     const seed = Date.now() / 900000;
     const fallbackData = generateMockAQI(seed);
     const cached = serverCacheInstance.get<AQIMeasurement[]>(cacheKey);
@@ -387,7 +375,7 @@ export async function getAQIData(): Promise<{ data: AQIMeasurement[]; status: 'o
 // 5. REST Countries & World Bank Adapter
 export async function getCountriesData(): Promise<{ data: CountryStat[]; status: 'online' | 'stale' | 'offline' }> {
   const cacheKey = 'countries_data';
-  const ttl = 24 * 60 * 60 * 1000; // 24 hours cache for countries (very static)
+  const ttl = 24 * 60 * 60 * 1000;
 
   if (!serverCacheInstance.isStale(cacheKey)) {
     return { data: serverCacheInstance.get<CountryStat[]>(cacheKey)!, status: 'online' };
@@ -422,38 +410,16 @@ export async function getCountriesData(): Promise<{ data: CountryStat[]; status:
       const languages = match?.languages ? Object.values(match.languages) as string[] : ['English'];
       const currencies = match?.currencies ? Object.keys(match.currencies) as string[] : ['USD'];
 
-      // Mock historical data since World Bank Indicators can be slow or blocked
       const historicalPopulation: { year: number; population: number }[] = [];
       const historicalGdp: { year: number; gdp: number }[] = [];
       const gdpMap: Record<string, number> = {
-        US: 25440000000000,
-        GB: 3080000000000,
-        JP: 4230000000000,
-        FR: 2780000000000,
-        DE: 4070000000000,
-        PH: 404000000000,
-        AU: 1680000000000,
-        CA: 2140000000000,
-        BR: 1920000000000,
-        ZA: 405000000000,
-        IN: 3390000000000,
-        SG: 466000000000,
-        AE: 507000000000,
-        MX: 1410000000000,
-        KR: 1670000000000,
-        ES: 1400000000000,
-        IT: 2010000000000,
-        NL: 1000000000000,
-        CH: 800000000000,
-        SE: 590000000000,
-        NO: 480000000000,
-        NZ: 250000000000,
-        AR: 490000000000,
-        EG: 400000000000,
-        TR: 900000000000,
-        SA: 1100000000000,
-        VN: 410000000000,
-        TH: 500000000000
+        US: 25440000000000, GB: 3080000000000, JP: 4230000000000, FR: 2780000000000,
+        DE: 4070000000000, PH: 404000000000, AU: 1680000000000, CA: 2140000000000,
+        BR: 1920000000000, ZA: 405000000000, IN: 3390000000000, SG: 466000000000,
+        AE: 507000000000, MX: 1410000000000, KR: 1670000000000, ES: 1400000000000,
+        IT: 2010000000000, NL: 1000000000000, CH: 800000000000, SE: 590000000000,
+        NO: 480000000000, NZ: 250000000000, AR: 490000000000, EG: 400000000000,
+        TR: 900000000000, SA: 1100000000000, VN: 410000000000, TH: 500000000000
       };
       const baseGdp = gdpMap[cityObj.code] ?? 1500000000000;
       

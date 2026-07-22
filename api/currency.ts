@@ -1,4 +1,4 @@
-import { getCurrencyData } from './_lib/adapters';
+import { getCurrencyData } from './_lib/adapters.js';
 
 export default async function handler(req: any, res: any) {
   try {

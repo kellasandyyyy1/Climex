@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { Alert, CryptoCoin, WeatherInfo, CurrencyPair, AQIMeasurement } from './types';
+import type { Alert, CryptoCoin, WeatherInfo, CurrencyPair, AQIMeasurement } from './types.js';
 
 // In-memory store for active alerts
 export const alertsList: Alert[] = [];

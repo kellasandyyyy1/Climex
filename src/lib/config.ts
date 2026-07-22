@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { CryptoCoin, WeatherDay, WeatherInfo, CurrencyPair, AQIMeasurement, CountryStat, DataSyncStatus } from '../types';
+import type { CryptoCoin, WeatherDay, WeatherInfo, CurrencyPair, AQIMeasurement, CountryStat, DataSyncStatus } from '../types';
 
 export const MONITORED_CITIES = [
   { city: 'New York', country: 'United States', lat: 40.7128, lon: -74.0060, timezone: 'America/New_York', code: 'US' },
