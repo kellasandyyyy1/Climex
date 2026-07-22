@@ -8,8 +8,8 @@ import path from 'path';
 import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
-import { getCryptoData, getWeatherData, getCurrencyData, getAQIData, getCountriesData } from './server/adapters';
-import { alertsList, evaluateRules, seedInitialAlerts, registerBroadcastCallback, addAlert } from './server/alertsEngine';
+import { getCryptoData, getWeatherData, getCurrencyData, getAQIData, getCountriesData } from './api/_lib/adapters';
+import { alertsList, evaluateRules, seedInitialAlerts, registerBroadcastCallback, addAlert } from './api/_lib/alertsEngine';
 import { Alert } from './src/types';
 
 async function startServer() {

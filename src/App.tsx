@@ -1917,13 +1917,11 @@ export default function App() {
                             <span className="text-[10px] font-sans font-normal uppercase tracking-wider">Live feed</span>
                           </div>
                         ) : wsStatus === 'reconnecting' || wsStatus === 'connecting' ? (
-                          <div className="flex items-center gap-1.5 text-status-warning shrink-0 select-none">
-                            <span className="w-1.5 h-1.5 rounded-full bg-status-warning animate-pulse shrink-0" />
-                            <span className="text-[10px] font-sans font-semibold uppercase tracking-wider">Reconnecting...</span>
+                          <div className="flex items-center gap-1.5 text-text-muted shrink-0 select-none">                            
+                            <span className="text-[10px] font-sans font-normal uppercase tracking-wider">Reconnecting...</span>
                           </div>
                         ) : (
                           <div className="flex items-center gap-1.5 text-text-muted shrink-0 select-none">
-                            <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />
                             <span className="text-[10px] font-sans font-normal uppercase tracking-wider">Offline</span>
                           </div>
                         )}
