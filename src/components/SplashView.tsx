@@ -4,8 +4,9 @@
  */
 
 import React from 'react';
-import { ArrowUpRight, Globe, ArrowsLeftRight } from '@phosphor-icons/react';
+import { ArrowUpRight, Globe, ArrowsLeftRight, MapPin } from '@phosphor-icons/react';
 import { motion, AnimatePresence } from 'motion/react';
+import { ROUTES, handleLinkClick } from '../lib/router';
 
 interface SplashViewProps {
   onLaunch: () => void;
@@ -159,6 +160,18 @@ export default function SplashView({ onLaunch }: SplashViewProps) {
               className="underline hover:text-text-primary transition-colors duration-150"
             >
               andrei
+            </a>
+          </span>
+          {/* Shown here because the browser location prompt appears on this screen */}
+          <span className="flex items-center gap-1.5">
+            <MapPin weight="light" size={12} className="shrink-0" />
+            Asks for your location —{' '}
+            <a
+              href={ROUTES.privacy}
+              onClick={handleLinkClick(ROUTES.privacy)}
+              className="underline hover:text-text-primary transition-colors duration-150"
+            >
+              privacy policy
             </a>
           </span>
         </div>

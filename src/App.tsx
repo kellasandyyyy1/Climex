@@ -12,6 +12,9 @@ import StatGauge from './components/StatGauge';
 import CalendarGrid from './components/CalendarGrid';
 import { PriceTrendChart, CurrencyHistoryChart, CountryGrowthChart, AQITrendChart } from './components/MetricCharts';
 import { SyncStatusWidget } from './components/SyncStatusWidget';
+import SiteFooter from './components/SiteFooter';
+import PrivacyPolicy from './components/PrivacyPolicy';
+import { useRoute } from './lib/router';
 import { telemetryLabels } from './telemetryLabels';
 import {
   Coins,
@@ -318,6 +321,7 @@ const getWeatherIcon = (code: number) => {
 };
 
 export default function App() {
+  const route = useRoute();
   const [showDashboard, setShowDashboard] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [data, setData] = useState<DashboardData | null>(null);
@@ -1040,6 +1044,12 @@ export default function App() {
     return toRate / fromRate;
   }, [data?.currency]);
 
+  // Standalone pages own the full viewport and bypass the splash screen so
+  // they stay reachable by direct link.
+  if (route === 'privacy') {
+    return <PrivacyPolicy />;
+  }
+
   if (!showDashboard) {
     return (
       <SplashView
@@ -1462,14 +1472,17 @@ export default function App() {
                 </nav>
               </div>
 
-              {/* Center Section: Promoted Global Search Bar (Responsive Desktop) */}
-              <div ref={searchRef} className="hidden md:block relative flex-grow max-w-[340px] mx-auto focus-within:max-w-[385px] transition-all duration-300 ease-out">
+              {/* Right Section: search, settings, and navigation controls */}
+              <div className="flex items-center gap-1.5 md:gap-3">
+
+              {/* Global Search Bar — grouped with the settings control on desktop */}
+              <div ref={searchRef} className="hidden md:block relative w-[220px] lg:w-[260px] focus-within:w-[300px] lg:focus-within:w-[340px] transition-all duration-300 ease-out">
                 <div className="relative">
                   <PhosphorIcon name="search" className="text-base absolute left-3.5 top-1/2 -translate-y-1/2 text-text-secondary" />
                   <input
                     ref={searchInputRef}
                     type="text"
-                    placeholder="Search assets, locations, or reports..."
+                    placeholder="Search assets, locations..."
                     className="w-full bg-surface-2 border border-border-hairline/60 focus:bg-surface-1 focus:border-border-strong focus:ring-2 focus:ring-text-primary/15 rounded-full pl-10 pr-12 py-2 font-sans text-xs focus:outline-none transition-all duration-300 text-text-primary shadow-inner"
                     value={globalSearchQuery}
                     onChange={(e) => {
@@ -1492,13 +1505,14 @@ export default function App() {
                   )}
                 </div>
 
+                {/* Results panel is right-aligned so it stays readable beside the narrower field */}
                 <AnimatePresence>
                   {showSearchResults && globalSearchQuery && (
                     <motion.div
                       initial={{ opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: 8 }}
-                      className="absolute top-full left-0 w-full mt-2 bg-surface-1/95 border border-border-hairline rounded-3xl p-3 shadow-xl z-50 backdrop-blur-md max-h-[320px] overflow-y-auto flex flex-col gap-1 scrollbar-thin"
+                      className="absolute top-full right-0 w-[340px] lg:w-[380px] mt-2 bg-surface-1/95 border border-border-hairline rounded-3xl p-3 shadow-xl z-50 backdrop-blur-md max-h-[320px] overflow-y-auto flex flex-col gap-1 scrollbar-thin"
                     >
                       {matchedSearchResults.length > 0 ? (
                         matchedSearchResults.map(result => (
@@ -1532,8 +1546,6 @@ export default function App() {
                 </AnimatePresence>
               </div>
 
-              {/* Right Section: Settings and theme toggle (No profile avatar KA) */}
-              <div className="flex items-center gap-1.5 md:gap-3">
                 {/* Search Icon Button for narrower viewports (mobile/tablet) */}
                 <button
                   onClick={() => setMobileSearchExpanded(true)}
@@ -1545,12 +1557,8 @@ export default function App() {
 
 
 
-                {/* Icon 1: Theme Switcher with friendly hover/click transition - hidden on mobile */}
-                <div className="hidden md:flex items-center justify-center transition-all duration-200 active:scale-95">
-                  <ThemeToggle />
-                </div>
-
-                {/* Icon 2: Settings Button with friendly hover/click transition - hidden on mobile */}
+                {/* Settings Button with friendly hover/click transition - hidden on mobile.
+                    Theme switching lives in Settings → Appearance. */}
                 <button
                   onClick={() => setActiveTab('settings')}
                   className={`hidden md:flex items-center justify-center w-9 h-9 rounded-full border transition-all duration-200 cursor-pointer active:scale-95 ${activeTab === 'settings'
@@ -1689,13 +1697,6 @@ export default function App() {
             </button>
           </div>
 
-          {/* Preferences Row for Mobile (Includes Theme Switcher) */}
-          <div className="flex items-center justify-between border-t border-border-hairline/60 pt-4 mt-2">
-            <span className="text-xs font-sans font-semibold text-text-secondary">Switch Theme</span>
-            <div className="flex items-center justify-center transition-all duration-200 active:scale-95">
-              <ThemeToggle />
-            </div>
-          </div>
         </div>
       )}
 
@@ -5407,15 +5408,6 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="bg-surface-2 border border-border-hairline/40 p-4 rounded-2xl flex items-start gap-3 mt-6">
-                  <PhosphorIcon name="info" className="text-base text-status-accent flex-shrink-0 mt-0.5" />
-                  <div>
-                    <h5 className="font-sans font-semibold text-xs text-text-primary">Single source of truth</h5>
-                    <p className="text-[10px] text-text-secondary leading-relaxed mt-0.5">
-                      Changing your display name here instantly syncs with local storage and updates your global greeting header across all active views.
-                    </p>
-                  </div>
-                </div>
               </div>
 
               {/* Right Column: Preferences — Span 7 */}
@@ -5427,6 +5419,17 @@ export default function App() {
                 </div>
 
                 <div className="divide-y divide-border-hairline">
+                  {/* Row 0: Appearance — the only place the theme can be switched */}
+                  <div className="py-4 flex items-center justify-between gap-4 border-b border-border-hairline/40">
+                    <div className="max-w-[70%]">
+                      <p className="font-sans font-semibold text-xs text-text-primary">Appearance</p>
+                      <p className="text-[10px] text-text-secondary mt-0.5">Switch between the light and dark theme</p>
+                    </div>
+                    <div className="flex items-center justify-center transition-all duration-200 active:scale-95">
+                      <ThemeToggle />
+                    </div>
+                  </div>
+
                   {/* Row 1: Update frequency */}
                   <div className="py-4 flex items-center justify-between gap-4 border-b border-border-hairline/40">
                     <div className="max-w-[70%]">
@@ -5591,19 +5594,7 @@ export default function App() {
           )}
 
           {/* Footer branding */}
-          <footer className="border-t border-border-hairline mt-12 py-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-sans text-text-secondary" id="climex-footer">
-            <p>&copy; 2026 Climex. All rights reserved.</p>
-            <div className="flex items-center gap-4">
-              <a
-                href="mailto:support@climex-analytics.com"
-                className="hover:text-text-primary transition-colors flex items-center gap-1 font-sans font-medium"
-              >
-                Support & Resources
-              </a>
-              <span>•</span>
-              <span className="font-sans font-medium text-[11px]">Climex Dashboard v1</span>
-            </div>
-          </footer>
+          <SiteFooter />
 
 
 

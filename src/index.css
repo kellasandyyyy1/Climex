@@ -131,6 +131,17 @@ body, h1, h2, h3, h4, h5, h6, .heading, .title, button {
   font-variant-numeric: tabular-nums;
 }
 
+/* Hides the scrollbar on horizontally scrolling rows (mobile nav, chip rows).
+   Referenced throughout the app; defined here since Tailwind has no such utility. */
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
 /* Custom visual utilities to match reference design */
 .diagonal-hatch {
   background-image: linear-gradient(45deg, var(--accent) 25%, transparent 25%, transparent 50%, var(--accent) 50%, var(--accent) 75%, transparent 75%, transparent);
