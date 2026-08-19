@@ -154,7 +154,7 @@ export default function SplashView({ onLaunch }: SplashViewProps) {
           <span>
             Developed by{' '}
             <a
-              href="https://kellasandrei.netlify.app"
+              href="https://seb.kelas.site"
               target="_blank"
               rel="noopener noreferrer"
               className="underline hover:text-text-primary transition-colors duration-150"
