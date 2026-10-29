@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#F4F3EE" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#1C1B19" media="(prefers-color-scheme: dark)" />
+  <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml" />
+  <title>You're offline · Climex</title>
+  <style>
+    /* Mirrors the app's tokens (src/index.css) so the page matches without loading the bundle */
+    :root {
+      --bg: #F4F3EE; --surface: #FFFFFF; --muted: #F0EEE6; --ink: #1A1915; --ink-soft: #3D3B35; --text-muted: #6A675E;
+      --line: #E4E1D7; --badge-bg: #F4EACB; --badge-fg: #6A5112; --shadow: 0 1px 0 0 rgb(26 25 21 / 0.05), 0 1px 3px 0 rgb(26 25 21 / 0.04);
+      --wordmark: url('/icons/climex-wordmark-light.png');
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1C1B19; --surface: #262522; --muted: #2F2E2A; --ink: #F4F3EE; --ink-soft: #CBC8BE; --text-muted: #A09D93;
+        --line: #383732; --badge-bg: #383019; --badge-fg: #EBCB7A; --shadow: 0 1px 0 0 rgb(0 0 0 / 0.25), 0 1px 3px 0 rgb(0 0 0 / 0.2);
+        --wordmark: url('/icons/climex-wordmark-dark.png');
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      background: var(--bg); color: var(--ink);
+      font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+      -webkit-font-smoothing: antialiased; line-height: 1.5;
+      min-height: 100vh; display: flex; flex-direction: column;
+      padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+    }
+    header { height: 64px; display: flex; align-items: center; padding: 0 24px; border-bottom: 1px solid var(--line); }
+    .wordmark { width: 96px; height: 25px; background: var(--wordmark) left center / contain no-repeat; }
+    main { flex: 1; display: grid; place-items: center; padding: 24px 16px; }
+    .card {
+      width: 100%; max-width: 440px; background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+      box-shadow: var(--shadow); padding: 28px 24px;
+    }
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 999px;
+      background: var(--badge-bg); color: var(--badge-fg); font-size: 12px; font-weight: 500;
+    }
+    .badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+    h1 { font-family: 'Source Serif 4', ui-serif, Georgia, serif; font-weight: 400; font-size: 30px; letter-spacing: -0.02em; line-height: 1.15; margin: 16px 0 8px; }
+    p { margin: 0; color: var(--ink-soft); font-size: 15px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 24px; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; height: 40px; padding: 0 16px; border-radius: 8px;
+      font-family: inherit; font-size: 14px; font-weight: 500; line-height: 1; cursor: pointer; text-decoration: none; border: 1px solid transparent;
+    }
+    .btn-primary { background: var(--ink); color: var(--bg); }
+    .btn-secondary { background: var(--surface); color: var(--ink); border-color: var(--line); }
+    .hint { margin-top: 18px; font-size: 13px; color: var(--text-muted); }
+  </style>
+</head>
+<body>
+  <header><span class="wordmark" role="img" aria-label="Climex"></span></header>
+  <main>
+    <section class="card" aria-labelledby="offline-title">
+      <span class="badge">Offline</span>
+      <h1 id="offline-title">You're offline</h1>
+      <p>This page isn't saved on your device yet. Your dashboard still works with the last data Climex saved.</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="/dashboard">Open saved dashboard</a>
+        <button class="btn btn-secondary" type="button" onclick="location.reload()">Try again</button>
+      </div>
+      <p class="hint">Climex reconnects on its own once you're back online.</p>
+    </section>
+  </main>
+  <script>window.addEventListener('online', () => location.reload());</script>
+</body>
+</html>

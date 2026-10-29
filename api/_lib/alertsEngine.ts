@@ -8,9 +8,27 @@ import type { Alert, CryptoCoin, WeatherInfo, CurrencyPair, AQIMeasurement } fro
 // In-memory store for active alerts
 export const alertsList: Alert[] = [];
 
-// Track active/triggered state to prevent duplicate firing (only alert on state transition)
+// Alerts are released as an hourly digest: each category posts at most once per window,
+// and an individual coin / city / pair is reported at most once per window.
+export const ALERT_INTERVAL_MS = 60 * 60 * 1000;
+
+type Category = Alert['category'];
+
+interface Candidate {
+  alert: Alert;
+  label: string; // short line used when several candidates are combined, e.g. "Monero −3.1%"
+  weight: number; // sort key: biggest move / worst reading first
+}
+
+// Track active/triggered state so an entity only queues on a state transition
 // Key: "category-entityId", Value: state status
 const activeStateMap = new Map<string, string>();
+// Last time each entity was included in a released alert
+const entityLastAlertAt = new Map<string, number>();
+// Last time each category released an alert
+const categoryLastAlertAt = new Map<Category, number>();
+// Triggered entities waiting for their category's next release
+const pending = new Map<Category, Map<string, Candidate>>();
 
 // WebSocket broadcast callback register
 let broadcastCallback: ((alert: Alert) => void) | null = null;
@@ -23,7 +41,7 @@ export function registerBroadcastCallback(cb: (alert: Alert) => void) {
 export function addAlert(alert: Alert) {
   // Prepend to top of list
   alertsList.unshift(alert);
-  
+
   // Limit memory storage to 50 alerts
   if (alertsList.length > 50) {
     alertsList.pop();
@@ -39,9 +57,103 @@ export function addAlert(alert: Alert) {
   }
 }
 
+function queue(category: Category, stateKey: string, candidate: Candidate, now: number) {
+  const last = entityLastAlertAt.get(stateKey);
+  if (last !== undefined && now - last < ALERT_INTERVAL_MS) return;
+  if (!pending.has(category)) pending.set(category, new Map());
+  pending.get(category)!.set(stateKey, candidate);
+}
+
+const SUMMARY_COPY: Record<Category, { icon: string; severity: Alert['severity']; headline: (n: number) => string; lead: string }> = {
+  crypto: {
+    icon: 'coin-stack',
+    severity: 'needs-attention',
+    headline: n => `${n} coins moved more than 3% in the past hour`,
+    lead: 'Biggest moves',
+  },
+  aqi: {
+    icon: 'wind',
+    severity: 'needs-attention',
+    headline: n => `Air quality is unhealthy for sensitive groups in ${n} cities`,
+    lead: 'Highest readings',
+  },
+  weather: {
+    icon: 'cloud-sun',
+    severity: 'needs-attention',
+    headline: n => `Heavy rain expected in ${n} cities`,
+    lead: 'Affected cities',
+  },
+  currency: {
+    icon: 'currency',
+    severity: 'fyi',
+    headline: n => `${n} currency pairs moved more than 1%`,
+    lead: 'Largest shifts',
+  },
+};
+
+/** Release one alert per category whose window has passed: the single candidate, or a combined summary. */
+function flush(now: number, isInitial: boolean) {
+  pending.forEach((items, category) => {
+    if (items.size === 0) return;
+    const last = categoryLastAlertAt.get(category);
+    if (!isInitial && last !== undefined && now - last < ALERT_INTERVAL_MS) return;
+
+    const candidates = [...items.values()].sort((a, b) => b.weight - a.weight);
+    let alert: Alert;
+    if (candidates.length === 1) {
+      alert = candidates[0].alert;
+    } else {
+      const copy = SUMMARY_COPY[category];
+      const top = candidates.slice(0, 5).map(c => c.label);
+      const more = candidates.length - top.length;
+      alert = {
+        id: `${category}-digest-${now}`,
+        category,
+        severity: copy.severity,
+        headline: copy.headline(candidates.length),
+        detail: `${copy.lead}: ${top.join(', ')}${more > 0 ? `, and ${more} more` : ''}.`,
+        createdAt: new Date(now).toISOString(),
+        icon: copy.icon,
+        sourceEvent: {
+          metric: candidates[0].alert.sourceEvent.metric,
+          value: candidates.length,
+          targetEntity: candidates.map(c => c.alert.sourceEvent.targetEntity).join(', '),
+          extraInfo: { items: candidates.length, window: '1 hour' },
+        },
+      };
+    }
+
+    items.forEach((_c, stateKey) => entityLastAlertAt.set(stateKey, now));
+    items.clear();
+    categoryLastAlertAt.set(category, now);
+
+    if (isInitial) {
+      alertsList.push(alert);
+    } else {
+      addAlert(alert);
+    }
+  });
+}
+
+/** Marks an entity triggered/normal; returns true only on the transition into "triggered". */
+function transition(stateKey: string, isTriggered: boolean): boolean {
+  const previousState = activeStateMap.get(stateKey) || 'normal';
+  if (isTriggered) {
+    if (previousState !== 'triggered') {
+      activeStateMap.set(stateKey, 'triggered');
+      return true;
+    }
+  } else if (previousState === 'triggered') {
+    activeStateMap.set(stateKey, 'normal');
+    // Recovered before its category's next release: don't report it
+    pending.forEach(items => items.delete(stateKey));
+  }
+  return false;
+}
+
 /**
  * Rules Engine for evaluating incoming data streams.
- * Triggers alerts on specific state transitions.
+ * Entities that cross a threshold are queued, then released as at most one alert per category per hour.
  */
 export function evaluateRules(
   crypto: CryptoCoin[],
@@ -50,168 +162,121 @@ export function evaluateRules(
   aqi: AQIMeasurement[],
   isInitial = false
 ) {
+  const now = Date.now();
+  const createdAt = new Date(now).toISOString();
+
   // 1. Evaluate Crypto Prices
   crypto.forEach(coin => {
     const stateKey = `crypto-${coin.id}`;
-    const previousState = activeStateMap.get(stateKey) || 'normal';
-    const isTriggered = Math.abs(coin.change24h) >= 3.0;
+    if (!transition(stateKey, Math.abs(coin.change24h) >= 3.0)) return;
 
-    if (isTriggered) {
-      if (previousState !== 'triggered') {
-        activeStateMap.set(stateKey, 'triggered');
-        
-        const changeDirection = coin.change24h >= 0 ? 'jumped' : 'dropped';
-        const finalPrice = coin.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        const changePercent = Math.abs(coin.change24h).toFixed(1);
-        
-        const alert: Alert = {
-          id: `crypto-${coin.id}-${Date.now()}`,
-          category: 'crypto',
-          severity: 'needs-attention',
-          headline: `${coin.name} ${changeDirection} ${changePercent}% past $${finalPrice}`,
-          detail: `Significant market volatility drives ${coin.symbol.toUpperCase()} price action. The asset is exhibiting increased trading momentum with volume surging past $${(coin.volume24h / 1e6).toFixed(1)}M.`,
-          createdAt: new Date().toISOString(),
-          icon: 'coin-stack',
-          sourceEvent: {
-            metric: 'price_change',
-            value: coin.price,
-            targetEntity: coin.id,
-            extraInfo: { change24h: coin.change24h, volume: coin.volume24h }
-          }
-        };
+    const changeDirection = coin.change24h >= 0 ? 'jumped' : 'dropped';
+    const finalPrice = coin.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const changePercent = Math.abs(coin.change24h).toFixed(1);
 
-        if (isInitial) {
-          alertsList.push(alert);
-        } else {
-          addAlert(alert);
+    queue('crypto', stateKey, {
+      label: `${coin.name} ${coin.change24h >= 0 ? '+' : '−'}${changePercent}%`,
+      weight: Math.abs(coin.change24h),
+      alert: {
+        id: `crypto-${coin.id}-${now}`,
+        category: 'crypto',
+        severity: 'needs-attention',
+        headline: `${coin.name} ${changeDirection} ${changePercent}% past $${finalPrice}`,
+        detail: `Significant market volatility drives ${coin.symbol.toUpperCase()} price action. The asset is exhibiting increased trading momentum with volume surging past $${(coin.volume24h / 1e6).toFixed(1)}M.`,
+        createdAt,
+        icon: 'coin-stack',
+        sourceEvent: {
+          metric: 'price_change',
+          value: coin.price,
+          targetEntity: coin.id,
+          extraInfo: { change24h: coin.change24h, volume: coin.volume24h }
         }
       }
-    } else {
-      if (previousState === 'triggered') {
-        activeStateMap.set(stateKey, 'normal');
-      }
-    }
+    }, now);
   });
 
   // 2. Evaluate Air Quality Index
   aqi.forEach(cityData => {
     const stateKey = `aqi-${cityData.city}`;
-    const previousState = activeStateMap.get(stateKey) || 'normal';
-    const isTriggered = cityData.aqi > 100;
+    if (!transition(stateKey, cityData.aqi > 100)) return;
 
-    if (isTriggered) {
-      if (previousState !== 'triggered') {
-        activeStateMap.set(stateKey, 'triggered');
-
-        const alert: Alert = {
-          id: `aqi-${cityData.city.replace(/\s+/g, '-').toLowerCase()}-${Date.now()}`,
-          category: 'aqi',
-          severity: 'needs-attention',
-          headline: `Air quality in ${cityData.city} is unhealthy for sensitive groups`,
-          detail: `The local air quality index reached an elevated reading of ${cityData.aqi} AQI. Children, elderly, and individuals with respiratory issues should limit prolonged outdoor exertion in ${cityData.city}.`,
-          createdAt: new Date().toISOString(),
-          icon: 'wind',
-          sourceEvent: {
-            metric: 'aqi_level',
-            value: cityData.aqi,
-            targetEntity: cityData.city,
-            extraInfo: { status: cityData.status, pm25: cityData.pm25, healthMessage: cityData.healthMessage }
-          }
-        };
-
-        if (isInitial) {
-          alertsList.push(alert);
-        } else {
-          addAlert(alert);
+    queue('aqi', stateKey, {
+      label: `${cityData.city} ${cityData.aqi} AQI`,
+      weight: cityData.aqi,
+      alert: {
+        id: `aqi-${cityData.city.replace(/\s+/g, '-').toLowerCase()}-${now}`,
+        category: 'aqi',
+        severity: 'needs-attention',
+        headline: `Air quality in ${cityData.city} is unhealthy for sensitive groups`,
+        detail: `The local air quality index reached an elevated reading of ${cityData.aqi} AQI. Children, elderly, and individuals with respiratory issues should limit prolonged outdoor exertion in ${cityData.city}.`,
+        createdAt,
+        icon: 'wind',
+        sourceEvent: {
+          metric: 'aqi_level',
+          value: cityData.aqi,
+          targetEntity: cityData.city,
+          extraInfo: { status: cityData.status, pm25: cityData.pm25, healthMessage: cityData.healthMessage }
         }
       }
-    } else {
-      if (previousState === 'triggered') {
-        activeStateMap.set(stateKey, 'normal');
-      }
-    }
+    }, now);
   });
 
   // 3. Evaluate Weather Precipitation
   weather.forEach(cityWeather => {
     const stateKey = `weather-${cityWeather.city}`;
-    const previousState = activeStateMap.get(stateKey) || 'normal';
-    const isTriggered = cityWeather.weatherCode >= 61;
+    if (!transition(stateKey, cityWeather.weatherCode >= 61)) return;
 
-    if (isTriggered) {
-      if (previousState !== 'triggered') {
-        activeStateMap.set(stateKey, 'triggered');
-
-        const alert: Alert = {
-          id: `weather-${cityWeather.city.replace(/\s+/g, '-').toLowerCase()}-${Date.now()}`,
-          category: 'weather',
-          severity: 'needs-attention',
-          headline: `Heavy rainfall warning issued for ${cityWeather.city}`,
-          detail: `Precipitation levels are forecast to exceed 12mm/h starting shortly. Active weather pattern is characterized as: ${cityWeather.condition}. Residents should prepare for potential roadway pooling.`,
-          createdAt: new Date().toISOString(),
-          icon: 'cloud-sun',
-          sourceEvent: {
-            metric: 'precipitation',
-            value: cityWeather.weatherCode,
-            targetEntity: cityWeather.city,
-            extraInfo: { temp: cityWeather.temp, condition: cityWeather.condition, windSpeed: cityWeather.windSpeed }
-          }
-        };
-
-        if (isInitial) {
-          alertsList.push(alert);
-        } else {
-          addAlert(alert);
+    queue('weather', stateKey, {
+      label: `${cityWeather.city} (${cityWeather.condition})`,
+      weight: cityWeather.weatherCode,
+      alert: {
+        id: `weather-${cityWeather.city.replace(/\s+/g, '-').toLowerCase()}-${now}`,
+        category: 'weather',
+        severity: 'needs-attention',
+        headline: `Heavy rainfall warning issued for ${cityWeather.city}`,
+        detail: `Precipitation levels are forecast to exceed 12mm/h starting shortly. Active weather pattern is characterized as: ${cityWeather.condition}. Residents should prepare for potential roadway pooling.`,
+        createdAt,
+        icon: 'cloud-sun',
+        sourceEvent: {
+          metric: 'precipitation',
+          value: cityWeather.weatherCode,
+          targetEntity: cityWeather.city,
+          extraInfo: { temp: cityWeather.temp, condition: cityWeather.condition, windSpeed: cityWeather.windSpeed }
         }
       }
-    } else {
-      if (previousState === 'triggered') {
-        activeStateMap.set(stateKey, 'normal');
-      }
-    }
+    }, now);
   });
 
   // 4. Evaluate Foreign Exchange Rates
   currency.forEach(pair => {
     const stateKey = `currency-${pair.id}`;
-    const previousState = activeStateMap.get(stateKey) || 'normal';
-    const isTriggered = Math.abs(pair.change24h) >= 1.0;
+    if (!transition(stateKey, Math.abs(pair.change24h) >= 1.0)) return;
 
-    if (isTriggered) {
-      if (previousState !== 'triggered') {
-        activeStateMap.set(stateKey, 'triggered');
+    const changeWord = pair.change24h >= 0 ? 'strengthened' : 'weakened';
+    const percentStr = Math.abs(pair.change24h).toFixed(2);
 
-        const changeWord = pair.change24h >= 0 ? 'strengthened' : 'weakened';
-        const percentStr = Math.abs(pair.change24h).toFixed(2);
-
-        const alert: Alert = {
-          id: `currency-${pair.id.toLowerCase()}-${Date.now()}`,
-          category: 'currency',
-          severity: 'fyi',
-          headline: `${pair.base} to ${pair.target} rate shifted by ${percentStr}%`,
-          detail: `The FX index moved with high trading momentum, with exchange rate at ${pair.rate.toFixed(4)} ${pair.target}. Greenback and major FX markets are reflecting a high volume index of $${(pair.volume / 1e6).toFixed(1)}M.`,
-          createdAt: new Date().toISOString(),
-          icon: 'currency',
-          sourceEvent: {
-            metric: 'exchange_rate',
-            value: pair.rate,
-            targetEntity: pair.id,
-            extraInfo: { change24h: pair.change24h, volume: pair.volume }
-          }
-        };
-
-        if (isInitial) {
-          alertsList.push(alert);
-        } else {
-          addAlert(alert);
+    queue('currency', stateKey, {
+      label: `${pair.base}/${pair.target} ${pair.change24h >= 0 ? '+' : '−'}${percentStr}%`,
+      weight: Math.abs(pair.change24h),
+      alert: {
+        id: `currency-${pair.id.toLowerCase()}-${now}`,
+        category: 'currency',
+        severity: 'fyi',
+        headline: `${pair.base} to ${pair.target} rate shifted by ${percentStr}%`,
+        detail: `The ${pair.base} ${changeWord} against the ${pair.target}, with the exchange rate at ${pair.rate.toFixed(4)} ${pair.target} on a volume index of $${(pair.volume / 1e6).toFixed(1)}M.`,
+        createdAt,
+        icon: 'currency',
+        sourceEvent: {
+          metric: 'exchange_rate',
+          value: pair.rate,
+          targetEntity: pair.id,
+          extraInfo: { change24h: pair.change24h, volume: pair.volume }
         }
       }
-    } else {
-      if (previousState === 'triggered') {
-        activeStateMap.set(stateKey, 'normal');
-      }
-    }
+    }, now);
   });
+
+  flush(now, isInitial);
 }
 
 /**

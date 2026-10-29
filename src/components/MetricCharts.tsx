@@ -4,6 +4,7 @@
  */
 
 import React from 'react';
+import StatusBadge from './StatusBadge';
 import {
   ResponsiveContainer,
   LineChart,
@@ -194,7 +195,7 @@ export function PriceTrendChart({ data, name, height = 'h-[250px]', timeframe = 
           color: textColor,
           font: {
             family: 'Inter, sans-serif',
-            size: 10,
+            size: 11.5,
           },
           maxTicksLimit: isMobile ? 4 : 8,
         }
@@ -211,7 +212,7 @@ export function PriceTrendChart({ data, name, height = 'h-[250px]', timeframe = 
           color: textColor,
           font: {
             family: 'Inter, sans-serif',
-            size: 10,
+            size: 11.5,
           },
           callback: function (value: any) {
             const num = Number(value);
@@ -277,7 +278,7 @@ export function CurrencyHistoryChart({ data, targetCurrency }: CurrencyHistoryCh
             domain={['auto', 'auto']}
             tickLine={false}
             axisLine={false}
-            tick={{ fill: 'var(--ink-soft)', fontSize: 10, fontFamily: 'var(--font-mono)' }}
+            tick={{ fill: 'var(--ink-soft)', fontSize: 11.5, fontFamily: 'var(--font-mono)' }}
           />
           <Tooltip
             contentStyle={{
@@ -308,10 +309,17 @@ interface CountryIndicatorChartProps {
   type: 'gdp' | 'population';
   countryName: string;
   flatStroke?: boolean;
+  /** Tailwind height class for the chart box, e.g. "h-[190px]" (mobile) or "h-[260px]" (desktop). */
+  heightClass?: string;
 }
 
-export function CountryGrowthChart({ data, type, countryName, flatStroke }: CountryIndicatorChartProps) {
+export function CountryGrowthChart({ data, type, countryName, flatStroke, heightClass = 'h-48 sm:h-64' }: CountryIndicatorChartProps) {
   const valueKey = type === 'gdp' ? 'gdp' : 'population';
+  // Unique gradient id per instance (mobile + desktop charts can coexist in the DOM)
+  const countryGradientId = `countryGrowthFill-${React.useId().replace(/:/g, '')}`;
+  const countryTick = { fill: 'var(--ink-soft)', fontSize: 12, fontFamily: 'var(--font-sans, Inter, sans-serif)' };
+  // Oldest year on the left so the trend reads left-to-right
+  const series = [...data].sort((a, b) => Number(a.year) - Number(b.year));
   const formatYAxis = (val: number) => {
     if (type === 'gdp') {
       return `$${(val / 1e12).toFixed(1)}T`;
@@ -320,49 +328,56 @@ export function CountryGrowthChart({ data, type, countryName, flatStroke }: Coun
   };
 
   return (
-    <div className="w-full h-48 sm:h-64" id="country-growth-chart">
+    <div className={`w-full ${heightClass}`} id="country-growth-chart">
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+        <AreaChart data={series} margin={{ top: 8, right: 8, left: -6, bottom: 0 }}>
           <defs>
-            <linearGradient id="colorGrowth" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="var(--purple)" stopOpacity={flatStroke ? 0 : 0.15} />
+            <linearGradient id={countryGradientId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="var(--purple)" stopOpacity={flatStroke ? 0.08 : 0.15} />
               <stop offset="95%" stopColor="var(--purple)" stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--line)" opacity={0.3} />
+          <CartesianGrid vertical={false} stroke="var(--line)" opacity={0.6} />
           <XAxis
             dataKey="year"
             tickLine={false}
             axisLine={false}
-            tick={{ fill: 'var(--ink-soft)', fontSize: 10, fontFamily: 'var(--font-mono)' }}
+            tickMargin={8}
+            minTickGap={16}
+            tick={countryTick}
           />
           <YAxis
             tickFormatter={formatYAxis}
             tickLine={false}
             axisLine={false}
-            tick={{ fill: 'var(--ink-soft)', fontSize: 10, fontFamily: 'var(--font-mono)' }}
+            width={52}
+            tick={countryTick}
           />
           <Tooltip
             formatter={(value: any) => {
               if (type === 'gdp') {
-                return [`$${Number(value).toLocaleString()}`, 'GDP (USD)'];
+                return [`$${(Number(value) / 1e12).toFixed(2)}T`, 'GDP (USD)'];
               }
               return [`${Number(value).toLocaleString()}`, 'Population'];
             }}
+            labelFormatter={(label: any) => `Year ${label}`}
             contentStyle={{
               backgroundColor: 'var(--surface)',
               borderColor: 'var(--line)',
-              borderRadius: '12px',
-              fontSize: '11px'
+              borderRadius: '10px',
+              fontSize: '13px',
+              color: 'var(--ink)'
             }}
+            cursor={{ stroke: 'var(--line)' }}
           />
           <Area
             type="monotone"
             dataKey={valueKey}
             stroke="var(--purple)"
             strokeWidth={2}
-            fillOpacity={flatStroke ? 0 : 1}
-            fill="url(#colorGrowth)"
+            fillOpacity={1}
+            fill={`url(#${countryGradientId})`}
+            activeDot={{ r: 4, fill: 'var(--purple)', stroke: 'var(--surface)', strokeWidth: 2 }}
             name={countryName}
           />
         </AreaChart>
@@ -375,10 +390,13 @@ export function CountryGrowthChart({ data, type, countryName, flatStroke }: Coun
 interface AQITrendChartProps {
   trendData: { time: string; aqi: number }[];
   city: string;
+  /** Compact mobile layout: shorter chart, tighter header. */
+  compact?: boolean;
 }
 
-export function AQITrendChart({ trendData, city }: AQITrendChartProps) {
+export function AQITrendChart({ trendData, city, compact = false }: AQITrendChartProps) {
   const [timeRange, setTimeRange] = React.useState<'24h' | '7d'>('24h');
+  const aqiGradientId = 'aqiGrad' + React.useId().replace(/[^a-zA-Z0-9]/g, '');
 
   const processedData = React.useMemo(() => {
     if (timeRange === '24h') {
@@ -390,10 +408,10 @@ export function AQITrendChart({ trendData, city }: AQITrendChartProps) {
       const list = [];
       // Use last point as base or default to 100
       const baseAQI = trendData && trendData.length > 0 ? trendData[trendData.length - 1].aqi : 75;
-      
+
       // Seeded random variation to keep values consistent for a given city
       const seedVal = city.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-      
+
       for (let i = 6; i >= 0; i--) {
         const dName = days[(todayIdx - i + 7) % 7];
         const dayAQI = Math.max(15, Math.min(500, Math.floor(baseAQI * (1 + Math.sin(seedVal + i * 0.8) * 0.22))));
@@ -415,109 +433,134 @@ export function AQITrendChart({ trendData, city }: AQITrendChartProps) {
     return 'Hazardous';
   };
 
-  const getCategoryColor = (aqi: number) => {
-    if (aqi <= 50) return '#10b981';
-    if (aqi <= 100) return '#eab308';
-    if (aqi <= 150) return '#f97316';
-    if (aqi <= 200) return '#ef4444';
-    if (aqi <= 300) return '#a855f7';
-    return '#991b1b';
-  };
+  const aqiValues = processedData.map((d) => d.aqi);
+  const aqiPeak = aqiValues.length ? Math.max(...aqiValues) : 0;
+  const aqiAvg = aqiValues.length ? Math.round(aqiValues.reduce((a, b) => a + b, 0) / aqiValues.length) : 0;
+  const aqiLow = aqiValues.length ? Math.min(...aqiValues) : 0;
+
+  const aqiThresholds = [
+    { y: 50, color: '#10b981', label: 'Good' },
+    { y: 100, color: '#eab308', label: 'Moderate' },
+    { y: 150, color: '#f97316', label: 'Sensitive' },
+    { y: 200, color: '#ef4444', label: 'Unhealthy' },
+  ];
 
   return (
-    <div className="border border-border-hairline rounded-3xl bg-surface-1 p-5 shadow-sm flex flex-col gap-4" id="aqi-trend-chart-card">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className={`card card-pad ${compact ? '' : 'md:p-6'} flex flex-col gap-4 h-full`} id="aqi-trend-chart-card">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
         <div>
-          <h4 className="font-sans font-semibold text-sm text-text-primary flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-status-accent" />
-            Air Quality History
-          </h4>
-          <p className="text-[11px] font-sans text-text-secondary mt-0.5">
-            Historical AQI exposure levels for <span className="font-semibold text-text-primary">{city}</span>
-          </p>
+          <h3 className="card-title">Air quality history</h3>
+          <p className="card-subtitle">AQI readings for {city}</p>
         </div>
 
         {/* Range Selector Tab Toggle */}
-        <div className="flex items-center gap-1 p-0.5 bg-surface-2 border border-border-hairline rounded-xl self-start sm:self-auto">
+        <div className={`segmented ${compact ? 'segmented-full' : 'self-start'}`}>
           <button
             onClick={() => setTimeRange('24h')}
-            className={`px-3 py-1 rounded-lg text-xs font-sans font-semibold transition-all ${
-              timeRange === '24h'
-                ? 'bg-surface-1 text-text-primary shadow-xs'
-                : 'text-text-muted hover:text-text-primary'
-            }`}
+            aria-pressed={timeRange === '24h'}
           >
-            24 Hours
+            24 hours
           </button>
           <button
             onClick={() => setTimeRange('7d')}
-            className={`px-3 py-1 rounded-lg text-xs font-sans font-semibold transition-all ${
-              timeRange === '7d'
-                ? 'bg-surface-1 text-text-primary shadow-xs'
-                : 'text-text-muted hover:text-text-primary'
-            }`}
+            aria-pressed={timeRange === '7d'}
           >
-            7 Days
+            7 days
           </button>
         </div>
       </div>
 
-      <div className="w-full h-56 sm:h-64 relative mt-2" id="aqi-recharts-trend-chart">
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={processedData} margin={{ top: 10, right: 15, left: -20, bottom: 0 }}>
-            <defs>
-              <linearGradient id="colorAqiGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="var(--status-accent, #38bdf8)" stopOpacity={0.2} />
-                <stop offset="95%" stopColor="var(--status-accent, #38bdf8)" stopOpacity={0} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border-hairline, #2a3340)" opacity={0.2} />
-            <XAxis
-              dataKey="time"
-              tickLine={false}
-              axisLine={false}
-              tick={{ fill: 'var(--text-muted, #94a3b8)', fontSize: 10, fontFamily: 'var(--font-sans, Inter)' }}
-            />
-            <YAxis
-              domain={[0, (dataMin: number) => Math.max(120, Math.min(500, Math.ceil(dataMin / 50) * 50 + 50))]}
-              tickLine={false}
-              axisLine={false}
-              tick={{ fill: 'var(--text-muted, #94a3b8)', fontSize: 10, fontFamily: 'var(--font-mono, monospace)' }}
-            />
-            
-            {/* EPA Threshold Reference Lines with Custom styling */}
-            <ReferenceLine y={50} stroke="#10b981" strokeDasharray="3 3" opacity={0.65} label={{ value: 'Good', fill: '#10b981', position: 'top', fontSize: 8, fontWeight: 'bold' }} />
-            <ReferenceLine y={100} stroke="#eab308" strokeDasharray="3 3" opacity={0.65} label={{ value: 'Mod', fill: '#eab308', position: 'top', fontSize: 8, fontWeight: 'bold' }} />
-            <ReferenceLine y={150} stroke="#f97316" strokeDasharray="3 3" opacity={0.65} label={{ value: 'USG', fill: '#f97316', position: 'top', fontSize: 8, fontWeight: 'bold' }} />
-            <ReferenceLine y={200} stroke="#ef4444" strokeDasharray="3 3" opacity={0.65} label={{ value: 'Unhealthy', fill: '#ef4444', position: 'top', fontSize: 8, fontWeight: 'bold' }} />
+      {aqiValues.length > 0 && (
+        <dl className="grid grid-cols-3 gap-3">
+          {[
+            { k: 'Peak', v: aqiPeak },
+            { k: 'Average', v: aqiAvg },
+            { k: 'Lowest', v: aqiLow },
+          ].map((s) => (
+            <div key={s.k} className="rounded-xl bg-surface-2 px-3 py-2">
+              <dt className="stat-label">{s.k}</dt>
+              <dd className="stat-value">{s.v}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
 
-            <Tooltip
-              formatter={(value: any) => {
-                const numVal = Number(value);
-                return [`${numVal} AQI (${getCategoryLabel(numVal)})`, 'Air Quality Index'];
-              }}
-              labelFormatter={(label) => `${timeRange === '24h' ? 'Time' : 'Day'}: ${label}`}
-              contentStyle={{
-                backgroundColor: 'var(--surface-1, #0d1117)',
-                borderColor: 'var(--border-hairline, #2a3340)',
-                borderRadius: '16px',
-                fontSize: '11px',
-                color: 'var(--text-primary, #f1f5f9)'
-              }}
-              itemStyle={{ color: 'var(--text-primary, #f1f5f9)' }}
-              labelStyle={{ color: 'var(--text-muted, #94a3b8)', fontWeight: 'semibold' }}
-            />
-            <Area
-              type="monotone"
-              dataKey="aqi"
-              stroke="var(--status-accent, #38bdf8)"
-              strokeWidth={2.5}
-              fillOpacity={1}
-              fill="url(#colorAqiGradient)"
-            />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
+      {aqiValues.length === 0 ? (
+        <div className={`w-full ${compact ? 'h-[180px]' : 'h-64'} rounded-xl bg-surface-2 flex flex-col items-center justify-center text-center px-4`}>
+          <p className="text-[14px] font-medium text-text-primary">No history yet</p>
+          <p className="text-[13px] text-text-muted mt-0.5">Readings for {city} will appear after the next sync.</p>
+        </div>
+      ) : (
+        <div className={`w-full ${compact ? 'h-[190px]' : 'h-64'} relative`} id="aqi-recharts-trend-chart">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={processedData} margin={{ top: 8, right: compact ? 4 : 12, left: compact ? -24 : -16, bottom: 0 }}>
+              <defs>
+                <linearGradient id={aqiGradientId} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="var(--text-accent)" stopOpacity={0.18} />
+                  <stop offset="95%" stopColor="var(--text-accent)" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--line)" />
+              <XAxis
+                dataKey="time"
+                tickLine={false}
+                axisLine={false}
+                minTickGap={compact ? 28 : 16}
+                tick={{ fill: 'var(--text-muted)', fontSize: 12, fontFamily: 'var(--font-sans)' }}
+              />
+              <YAxis
+                domain={[0, (dataMax: number) => Math.max(120, Math.min(500, Math.ceil(dataMax / 50) * 50 + 50))]}
+                tickLine={false}
+                axisLine={false}
+                width={compact ? 44 : 50}
+                tick={{ fill: 'var(--text-muted)', fontSize: 12, fontFamily: 'var(--font-sans)' }}
+              />
+
+              {/* EPA threshold reference lines */}
+              {aqiThresholds.map((t) => (
+                <ReferenceLine
+                  key={t.y}
+                  y={t.y}
+                  stroke={t.color}
+                  strokeDasharray="4 4"
+                  strokeOpacity={0.7}
+                  label={compact ? undefined : { value: t.label, fill: 'var(--text-muted)', position: 'insideTopRight', fontSize: 12 }}
+                />
+              ))}
+
+              <Tooltip
+                formatter={(value: any) => {
+                  const numVal = Number(value);
+                  return [`${numVal} (${getCategoryLabel(numVal)})`, 'AQI'];
+                }}
+                labelFormatter={(label) => `${timeRange === '24h' ? 'Time' : 'Day'}: ${label}`}
+                contentStyle={{
+                  backgroundColor: 'var(--surface)',
+                  borderColor: 'var(--line)',
+                  borderRadius: '12px',
+                  fontSize: '13px',
+                  color: 'var(--ink)',
+                  boxShadow: 'var(--card-shadow)'
+                }}
+                itemStyle={{ color: 'var(--ink)' }}
+                labelStyle={{ color: 'var(--text-muted)', fontWeight: 500 }}
+              />
+              <Area
+                type="monotone"
+                dataKey="aqi"
+                stroke="var(--text-accent)"
+                strokeWidth={2}
+                fillOpacity={1}
+                fill={`url(#${aqiGradientId})`}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {compact && aqiValues.length > 0 && (
+        <p className="text-[12px] text-text-muted">Dashed lines mark the EPA thresholds at 50, 100, 150 and 200.</p>
+      )}
     </div>
   );
 }

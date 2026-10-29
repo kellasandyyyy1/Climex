@@ -56,7 +56,7 @@ export async function getCryptoData(): Promise<{ data: CryptoCoin[]; status: 'on
 
   try {
     const ids = COINGECKO_COINS.map(c => c.id).join(',');
-    const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${ids}&price_change_percentage=24h`;
+    const url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&ids=${ids}&price_change_percentage=24h&sparkline=true`;
     
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 4000);
@@ -82,9 +82,19 @@ export async function getCryptoData(): Promise<{ data: CryptoCoin[]; status: 'on
       const marketCap = match ? match.market_cap : 1800000000000 / (index + 1);
       const volume24h = match ? match.total_volume : 28000000000 / (index + 1);
       
-      const sparkline: number[] = [];
-      for (let i = 0; i < 24; i++) {
-        sparkline.push(price * (1 + Math.sin(timeSeed + i * 0.5 + index) * 0.015));
+      // Last 24 hours of hourly prices, ending at the live price.
+      // CoinGecko's sparkline_in_7d is hourly; if it's missing, draw a smooth path from the 24h open to now.
+      const hourly: number[] = Array.isArray(match?.sparkline_in_7d?.price) ? match.sparkline_in_7d.price : [];
+      let sparkline: number[];
+      if (hourly.length >= 24) {
+        sparkline = [...hourly.slice(-24), price];
+      } else {
+        const open = price / (1 + change24h / 100);
+        sparkline = Array.from({ length: 25 }, (_, i) => {
+          const t = i / 24;
+          const wobble = Math.sin(timeSeed + i * 0.9 + index) * 0.004 * Math.sin(Math.PI * t);
+          return (open + (price - open) * t) * (1 + wobble);
+        });
       }
 
       return {

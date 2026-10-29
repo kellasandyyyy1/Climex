@@ -5,7 +5,8 @@
 
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { MONITORED_CITIES } from '../lib/config';
-import { Thermometer, Wind, Clock, Plus, Minus, ArrowCounterClockwise } from '@phosphor-icons/react';
+import StatusBadge, { aqiTone } from './StatusBadge';
+import { Plus, Minus, ArrowCounterClockwise } from './Icon';
 import { geoNaturalEarth1, geoPath } from 'd3-geo';
 import { feature } from 'topojson-client';
 
@@ -15,414 +16,319 @@ interface MapPanelProps {
   weatherData: any[];
   aqiData: any[];
   tempUnit?: string;
+  /** Tailwind height class for the map canvas; when omitted the map keeps a world-shaped aspect ratio. */
+  heightClass?: string;
+  /** Small-screen layout: summary below the map, shorter list. */
+  compact?: boolean;
 }
 
-export default function MapPanel({ onSelectCity, selectedCity, weatherData, aqiData, tempUnit }: MapPanelProps) {
+// US EPA AQI bands, in slightly muted tones that sit well on the ivory/charcoal surfaces
+const LEVELS = [
+  { key: 'good', label: 'Good', max: 50, color: '#3F9C6D' },
+  { key: 'moderate', label: 'Moderate', max: 100, color: '#D3A12A' },
+  { key: 'sensitive', label: 'Sensitive groups', max: 150, color: '#DD7A35' },
+  { key: 'unhealthy', label: 'Unhealthy', max: 200, color: '#D2493A' },
+  { key: 'very', label: 'Very unhealthy', max: 300, color: '#8E5BC4' },
+  { key: 'hazardous', label: 'Hazardous', max: Infinity, color: '#8C2230' },
+] as const;
+
+const levelFor = (aqi: number) => LEVELS.find(l => aqi <= l.max) ?? LEVELS[LEVELS.length - 1];
+
+interface Station {
+  city: string;
+  country: string;
+  lat: number;
+  lon: number;
+  aqi: number | null;
+  status?: string;
+  pm25?: number;
+  temp?: number;
+  condition?: string;
+}
+
+export default function MapPanel({ onSelectCity, selectedCity, weatherData, aqiData, tempUnit, heightClass, compact = false }: MapPanelProps) {
   const [hoveredCity, setHoveredCity] = useState<string | null>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 400 });
-  const [worldData, setWorldData] = useState<any>(null);
+  const [land, setLand] = useState<any>(null);
+  const [mapError, setMapError] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Zoom and Pan states
+  // Zoom and pan
   const [zoomScale, setZoomScale] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const dragStart = useRef({ x: 0, y: 0 });
+  const dragOrigin = useRef({ x: 0, y: 0 });
   const wasDragged = useRef(false);
-  const dragStartCoords = useRef({ x: 0, y: 0 });
 
-  // ResizeObserver for dynamic, highly responsive scaling
   useEffect(() => {
     if (!containerRef.current) return;
-    const resizeObserver = new ResizeObserver((entries) => {
-      for (let entry of entries) {
+    const observer = new ResizeObserver(entries => {
+      for (const entry of entries) {
         const { width, height } = entry.contentRect;
-        if (width > 0 && height > 0) {
-          setDimensions({ width, height });
-        }
+        if (width > 0 && height > 0) setDimensions({ width, height });
       }
     });
-    resizeObserver.observe(containerRef.current);
-    return () => resizeObserver.disconnect();
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
   }, []);
 
-  // Fetch World TopoJSON at runtime (110m resolution for lightweight, high-performance loading)
   useEffect(() => {
     fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json')
-      .then((res) => {
+      .then(res => {
         if (!res.ok) throw new Error('Failed to load map topology');
         return res.json();
       })
-      .then((topology) => {
-        const geojson = feature(topology, topology.objects.countries as any);
-        setWorldData(geojson);
+      .then(topology => {
+        const geo: any = feature(topology, topology.objects.countries as any);
+        // Drop Antarctica so the inhabited world fills the frame
+        setLand({ ...geo, features: geo.features.filter((f: any) => f.id !== '010') });
       })
-      .catch((err) => {
+      .catch(err => {
         console.error('Error loading world map atlas:', err);
+        setMapError(true);
       });
   }, []);
 
-  const formatTempTooltip = (tempC: number) => {
-    if (tempUnit === 'F') {
-      return `${Math.round((tempC * 9 / 5) + 32)}°F`;
-    }
-    return `${tempC}°C`;
-  };
+  const stations: Station[] = useMemo(
+    () =>
+      MONITORED_CITIES.map(c => {
+        const a = aqiData?.find(x => x.city.toLowerCase() === c.city.toLowerCase());
+        const w = weatherData?.find(x => x.city.toLowerCase() === c.city.toLowerCase());
+        return { city: c.city, country: c.country, lat: c.lat, lon: c.lon, aqi: a?.aqi ?? null, status: a?.status, pm25: a?.pm25, temp: w?.temp, condition: w?.condition };
+      }),
+    [aqiData, weatherData]
+  );
 
-  // Create d3-geo projection and path generator based on responsive dimensions
+  const pad = compact ? 8 : 16;
   const projection = useMemo(() => {
-    // Dynamic scaling: fit neatly inside the responsive aspect ratio
-    const scale = Math.min(dimensions.width / 5.4, dimensions.height * 0.44);
-    return geoNaturalEarth1()
-      .scale(scale)
-      .translate([dimensions.width / 2, dimensions.height / 2 + 15]);
-  }, [dimensions.width, dimensions.height]);
-
+    const p = geoNaturalEarth1();
+    if (land) p.fitExtent([[pad, pad], [dimensions.width - pad, dimensions.height - pad]], land);
+    else p.scale(Math.min(dimensions.width / 5.6, dimensions.height * 0.46)).translate([dimensions.width / 2, dimensions.height / 2]);
+    return p;
+  }, [land, dimensions.width, dimensions.height, pad]);
   const pathGenerator = useMemo(() => geoPath().projection(projection), [projection]);
+  const project = (s: Station) => projection([s.lon, s.lat]) ?? [0, 0];
+  const toScreen = ([x, y]: [number, number] | number[]) => ({
+    x: (x - dimensions.width / 2) * zoomScale + dimensions.width / 2 + panOffset.x,
+    y: (y - dimensions.height / 2) * zoomScale + dimensions.height / 2 + panOffset.y,
+  });
 
-  // Calibration helper using the real projection coordinates
-  const getXY = (lat: number, lon: number) => {
-    const projected = projection([lon, lat]);
-    if (!projected) return { x: 0, y: 0 };
-    return { x: projected[0], y: projected[1] };
+  const formatTemp = (tempC: number) => (tempUnit === 'F' ? `${Math.round((tempC * 9) / 5 + 32)}°F` : `${Math.round(tempC)}°C`);
+
+  // Summary: counts per level and the worst readings
+  const counts = LEVELS.map(l => ({ ...l, count: stations.filter(s => s.aqi !== null && levelFor(s.aqi).key === l.key).length }));
+  const measured = stations.filter(s => s.aqi !== null).length;
+  const worst = [...stations].filter(s => s.aqi !== null).sort((a, b) => (b.aqi ?? 0) - (a.aqi ?? 0)).slice(0, compact ? 3 : 5);
+
+  const zoomTo = (next: number) => {
+    const z = Math.min(5, Math.max(1, next));
+    setZoomScale(z);
+    if (z === 1) setPanOffset({ x: 0, y: 0 });
   };
 
-  const getCityDetails = (cityName: string) => {
-    const weather = weatherData?.find((w) => w.city.toLowerCase() === cityName.toLowerCase());
-    const aqi = aqiData?.find((a) => a.city.toLowerCase() === cityName.toLowerCase());
-    return { weather, aqi };
-  };
-
-  const activeCityDetails = hoveredCity ? getCityDetails(hoveredCity) : null;
-  const activeCityCoords = hoveredCity ? MONITORED_CITIES.find(c => c.city === hoveredCity) : null;
-  const activeXYRaw = activeCityCoords ? getXY(activeCityCoords.lat, activeCityCoords.lon) : null;
-
-  const activeXY = useMemo(() => {
-    if (!activeXYRaw) return null;
-    const x1 = activeXYRaw.x - dimensions.width / 2;
-    const y1 = activeXYRaw.y - dimensions.height / 2;
-    const x_final = x1 * zoomScale + dimensions.width / 2 + panOffset.x;
-    const y_final = y1 * zoomScale + dimensions.height / 2 + panOffset.y;
-    return { x: x_final, y: y_final };
-  }, [activeXYRaw, zoomScale, panOffset, dimensions.width, dimensions.height]);
-
-  const handleMouseDown = (e: React.MouseEvent) => {
+  const onPointerDown = (e: React.PointerEvent) => {
+    wasDragged.current = false;
     if (zoomScale <= 1) return;
     setIsDragging(true);
-    dragStartCoords.current = { x: e.clientX, y: e.clientY };
-    setDragStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
-    wasDragged.current = false;
+    dragOrigin.current = { x: e.clientX, y: e.clientY };
+    dragStart.current = { x: e.clientX - panOffset.x, y: e.clientY - panOffset.y };
   };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
+  const onPointerMove = (e: React.PointerEvent) => {
     if (!isDragging) return;
-    const dx = Math.abs(e.clientX - dragStartCoords.current.x);
-    const dy = Math.abs(e.clientY - dragStartCoords.current.y);
-    if (dx > 4 || dy > 4) {
-      wasDragged.current = true;
-    }
-    const maxPanX = (dimensions.width * (zoomScale - 1)) / 2;
-    const maxPanY = (dimensions.height * (zoomScale - 1)) / 2;
-    const newX = Math.min(maxPanX, Math.max(-maxPanX, e.clientX - dragStart.x));
-    const newY = Math.min(maxPanY, Math.max(-maxPanY, e.clientY - dragStart.y));
-    setPanOffset({ x: newX, y: newY });
+    if (Math.abs(e.clientX - dragOrigin.current.x) > 4 || Math.abs(e.clientY - dragOrigin.current.y) > 4) wasDragged.current = true;
+    const maxX = (dimensions.width * (zoomScale - 1)) / 2;
+    const maxY = (dimensions.height * (zoomScale - 1)) / 2;
+    setPanOffset({
+      x: Math.min(maxX, Math.max(-maxX, e.clientX - dragStart.current.x)),
+      y: Math.min(maxY, Math.max(-maxY, e.clientY - dragStart.current.y)),
+    });
   };
+  const endDrag = () => setIsDragging(false);
 
-  const handleMouseUpOrLeave = () => {
-    setIsDragging(false);
-  };
+  const hovered = hoveredCity ? stations.find(s => s.city === hoveredCity) : null;
+  const hoveredXY = hovered ? toScreen(project(hovered)) : null;
+  const k = 1 / zoomScale;
+  const isSelected = (s: Station) => s.city.toLowerCase() === selectedCity.toLowerCase();
 
-  return (
-    <div
-      ref={containerRef}
-      className="relative w-full h-[400px] border border-border-hairline border-t-2 border-t-status-accent rounded-3xl p-4 overflow-hidden shadow-xs"
-      style={{ backgroundColor: '#0d1117' }}
-      id="global-map-panel"
-    >
-      {/* Background Subtle Grid Lines */}
-      <div
-        className="absolute inset-0 opacity-[0.02] pointer-events-none"
-        style={{
-          backgroundImage: 'radial-gradient(circle, #2a3340 1px, transparent 1px)',
-          backgroundSize: '24px 24px',
-        }}
-      />
+  const ctrl = 'w-9 h-9 md:w-8 md:h-8 flex items-center justify-center text-text-secondary hover:text-text-primary hover:bg-surface-2 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default';
 
-      {/* Map Header */}
-      <div className="absolute top-4 left-6 z-10 flex items-center gap-2 pointer-events-none">
-        <span className="w-2.5 h-2.5 rounded-full bg-status-accent animate-pulse" />
-        <h3 className="font-sans font-medium text-sm tracking-tight text-slate-100">Air quality map</h3>
-        <span className="font-sans text-[10px] text-slate-400 bg-[#1a2029]/80 px-2 py-0.1 rounded-full font-medium border border-[#2a3340]/50 backdrop-blur-xs">
-          {MONITORED_CITIES.length} Monitoring stations
-        </span>
+  const summary = (
+    <div className="flex flex-col gap-4 min-w-0">
+      {/* Distribution */}
+      <div>
+        <div className="flex items-baseline justify-between gap-2">
+          <p className="text-[13px] font-medium text-text-secondary">Air quality by city</p>
+          <p className="text-[12px] text-text-muted tabular-nums">{measured} cities</p>
+        </div>
+        <div className="mt-2 flex h-2 w-full overflow-hidden rounded-full bg-surface-2" role="img" aria-label={counts.filter(c => c.count).map(c => `${c.count} ${c.label}`).join(', ')}>
+          {counts.map(c => c.count > 0 && (
+            <span key={c.key} style={{ width: `${(c.count / Math.max(1, measured)) * 100}%`, backgroundColor: c.color }} className="h-full first:rounded-l-full last:rounded-r-full" />
+          ))}
+        </div>
+        <ul className={`mt-3 grid gap-x-4 gap-y-1.5 ${compact ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          {counts.map(c => (
+            <li key={c.key} className={`flex items-center justify-between gap-2 text-[13px] ${c.count ? 'text-text-primary' : 'text-text-muted'}`}>
+              <span className="flex items-center gap-2 min-w-0">
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: c.color, opacity: c.count ? 1 : 0.4 }} />
+                <span className="truncate">{c.label}</span>
+              </span>
+              <span className="tabular-nums font-medium">{c.count}</span>
+            </li>
+          ))}
+        </ul>
       </div>
 
-      {/* Floating Zoom & Pan Controls */}
-      <div className="absolute top-4 right-4 z-10 flex items-center gap-1 bg-[#1a2029]/90 p-1.5 rounded-2xl border border-[#2a3340]/60 backdrop-blur-md shadow-lg">
-        <button
-          onClick={() => setZoomScale((prev) => Math.min(5, prev + 0.5))}
-          className="p-1.5 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/80 transition-all cursor-pointer flex items-center justify-center"
-          title="Zoom In"
+      {/* Worst readings */}
+      <div className="border-t border-border-hairline pt-4">
+        <p className="text-[13px] font-medium text-text-secondary mb-1.5">Highest readings</p>
+        <ul className="flex flex-col -mx-2">
+          {worst.map(s => {
+            const lvl = levelFor(s.aqi ?? 0);
+            return (
+              <li key={s.city}>
+                <button
+                  onClick={() => onSelectCity(s.city)}
+                  onMouseEnter={() => setHoveredCity(s.city)}
+                  onMouseLeave={() => setHoveredCity(null)}
+                  aria-current={isSelected(s) ? 'true' : undefined}
+                  className={`w-full flex items-center justify-between gap-3 px-2 h-10 rounded-lg text-left transition-colors cursor-pointer ${isSelected(s) ? 'bg-surface-2' : 'hover:bg-surface-2'}`}
+                >
+                  <span className="flex items-center gap-2.5 min-w-0">
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: lvl.color }} />
+                    <span className="min-w-0">
+                      <span className="block text-[14px] font-medium text-text-primary truncate leading-tight">{s.city}</span>
+                      <span className="block text-[12px] text-text-muted truncate leading-tight">{s.country}</span>
+                    </span>
+                  </span>
+                  <span className="text-[14px] font-semibold tabular-nums text-text-primary">{s.aqi}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className={`grid gap-4 md:gap-5 ${compact ? '' : 'lg:grid-cols-[minmax(0,1fr)_260px]'}`} id="global-map-panel-wrapper">
+      <div
+        ref={containerRef}
+        className={`relative w-full ${heightClass ?? (compact ? 'aspect-[1.75/1]' : 'aspect-[2.15/1] min-h-[260px]')} rounded-xl border border-border-hairline bg-surface-2/60 overflow-hidden`}
+        id="global-map-panel"
+      >
+        {/* Zoom controls (joined group) */}
+        <div className="absolute top-3 right-3 z-10 flex flex-col overflow-hidden rounded-lg border border-border-hairline bg-surface-1 shadow-xs divide-y divide-border-hairline">
+          <button onClick={() => zoomTo(zoomScale + 0.5)} disabled={zoomScale >= 5} className={ctrl} aria-label="Zoom in" title="Zoom in">
+            <Plus size={15} />
+          </button>
+          <button onClick={() => zoomTo(zoomScale - 0.5)} disabled={zoomScale <= 1} className={ctrl} aria-label="Zoom out" title="Zoom out">
+            <Minus size={15} />
+          </button>
+          {zoomScale > 1 && (
+            <button onClick={() => zoomTo(1)} className={ctrl} aria-label="Reset view" title="Reset view">
+              <ArrowCounterClockwise size={14} />
+            </button>
+          )}
+        </div>
+
+        {!land && !mapError && <span aria-hidden="true" className="skeleton absolute inset-0 rounded-none opacity-70" />}
+        {mapError && (
+          <div className="absolute inset-x-0 bottom-3 flex justify-center pointer-events-none">
+            <span className="text-[12.5px] text-text-muted bg-surface-1/90 border border-border-hairline rounded-md px-2 py-1">Map outline unavailable — stations are still shown</span>
+          </div>
+        )}
+
+        <svg
+          width="100%"
+          height="100%"
+          className={`select-none ${zoomScale > 1 ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : ''}`}
+          style={{ touchAction: zoomScale > 1 ? 'none' : 'pan-y' }}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={endDrag}
+          onPointerLeave={endDrag}
+          onPointerCancel={endDrag}
+          role="img"
+          aria-label={`World map of ${stations.length} air quality stations`}
         >
-          <Plus size={14} weight="bold" />
-        </button>
-        <button
-          onClick={() => {
-            setZoomScale((prev) => {
-              const next = Math.max(1, prev - 0.5);
-              if (next === 1) {
-                setPanOffset({ x: 0, y: 0 });
-              }
-              return next;
-            });
-          }}
-          className="p-1.5 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/80 transition-all cursor-pointer flex items-center justify-center"
-          title="Zoom Out"
-        >
-          <Minus size={14} weight="bold" />
-        </button>
-        <button
-          onClick={() => {
-            setZoomScale(1);
-            setPanOffset({ x: 0, y: 0 });
-          }}
-          className="p-1.5 rounded-xl text-slate-300 hover:text-white hover:bg-slate-800/80 transition-all cursor-pointer flex items-center justify-center"
-          title="Reset View"
-        >
-          <ArrowCounterClockwise size={14} weight="bold" />
-        </button>
-        {zoomScale > 1 && (
-          <span className="font-mono text-[9px] text-slate-400 px-1.5 font-semibold">
-            {zoomScale.toFixed(1)}x
-          </span>
+          <g
+            transform={`translate(${dimensions.width / 2 + panOffset.x}, ${dimensions.height / 2 + panOffset.y}) scale(${zoomScale}) translate(${-dimensions.width / 2}, ${-dimensions.height / 2})`}
+            style={{ transition: isDragging ? 'none' : 'transform 0.18s ease-out' }}
+          >
+            {land?.features?.map((f: any, idx: number) => {
+              const d = pathGenerator(f);
+              return d ? <path key={idx} d={d} fill="var(--line)" stroke="var(--surface-muted)" strokeWidth={0.7 * k} /> : null;
+            })}
+
+            {/* Pins: unselected first so the selected one sits on top */}
+            {[...stations].sort((a, b) => Number(isSelected(a)) - Number(isSelected(b))).map(s => {
+              const [x, y] = project(s);
+              const lvl = levelFor(s.aqi ?? 0);
+              const sel = isSelected(s);
+              const hov = hoveredCity === s.city;
+              const label = `${s.city}${s.aqi !== null ? ` · ${s.aqi}` : ''}`;
+              const labelW = label.length * 6.6 + 16;
+              // Keep the selected label inside the frame: flip it to the left of the pin near the right edge
+              const flip = toScreen([x, y]).x + (labelW + 14) > dimensions.width - 8;
+              return (
+                <g
+                  key={s.city}
+                  className="cursor-pointer"
+                  onMouseEnter={() => setHoveredCity(s.city)}
+                  onMouseLeave={() => setHoveredCity(null)}
+                  onClick={() => !wasDragged.current && onSelectCity(s.city)}
+                >
+                  <circle cx={x} cy={y} r={14 * k} fill="transparent" />
+                  {(sel || hov) && <circle cx={x} cy={y} r={10 * k} fill={lvl.color} opacity={0.18} />}
+                  <circle cx={x} cy={y} r={(sel || hov ? 5.5 : 4.5) * k} fill={lvl.color} stroke="var(--surface)" strokeWidth={1.75 * k} />
+                  {sel && (
+                    <g transform={`translate(${flip ? x - (labelW + 12) * k : x + 12 * k}, ${y - 11 * k}) scale(${k})`} className="pointer-events-none">
+                      <rect width={labelW} height={22} rx={6} fill="var(--ink)" />
+                      <text x={8} y={15} fill="var(--bg-base)" style={{ fontSize: 12, fontWeight: 600, fontFamily: 'var(--font-sans)' }}>
+                        {label}
+                      </text>
+                    </g>
+                  )}
+                </g>
+              );
+            })}
+          </g>
+        </svg>
+
+        {/* Hover card */}
+        {hovered && hoveredXY && !isSelected(hovered) && (
+          <div
+            className="absolute z-20 pointer-events-none w-[210px] p-3 bg-surface-1 border border-border-hairline rounded-xl shadow-md"
+            style={{
+              left: Math.min(dimensions.width - 222, Math.max(12, hoveredXY.x + 14)),
+              top: Math.min(dimensions.height - 118, Math.max(12, hoveredXY.y - 20)),
+            }}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-[14px] font-semibold text-text-primary truncate leading-tight">{hovered.city}</p>
+                <p className="text-[12px] text-text-muted truncate">{hovered.country}</p>
+              </div>
+              {hovered.aqi !== null && <StatusBadge tone={aqiTone(hovered.status).tone} size="xs">AQI {hovered.aqi}</StatusBadge>}
+            </div>
+            <dl className="mt-2.5 pt-2.5 border-t border-border-hairline grid grid-cols-2 gap-2 text-[12px]">
+              <div>
+                <dt className="text-text-muted">PM2.5</dt>
+                <dd className="text-[13px] font-semibold text-text-primary tabular-nums">{hovered.pm25 ?? '—'} <span className="font-normal text-text-muted">µg/m³</span></dd>
+              </div>
+              <div>
+                <dt className="text-text-muted">Weather</dt>
+                <dd className="text-[13px] font-semibold text-text-primary tabular-nums truncate">{hovered.temp !== undefined ? formatTemp(hovered.temp) : '—'}</dd>
+              </div>
+            </dl>
+            <p className="mt-2 text-[12px] text-text-muted">Click to view this city</p>
+          </div>
         )}
       </div>
 
-      {/* SVG Map Canvas */}
-      <svg
-        width="100%"
-        height="100%"
-        className={`text-text-primary/10 select-none ${zoomScale > 1 ? (isDragging ? 'cursor-grabbing' : 'cursor-grab') : 'cursor-default'
-          }`}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={handleMouseUpOrLeave}
-        onMouseLeave={handleMouseUpOrLeave}
-      >
-        <g
-          transform={`translate(${dimensions.width / 2 + panOffset.x}, ${dimensions.height / 2 + panOffset.y}) scale(${zoomScale}) translate(${-dimensions.width / 2}, ${-dimensions.height / 2})`}
-          style={{ transition: isDragging ? 'none' : 'transform 0.15s ease-out' }}
-        >
-          {/* Render filled geographic countries */}
-          {worldData && worldData.features && (
-            <g className="countries-layer">
-              {worldData.features.map((feature: any, idx: number) => {
-                const d = pathGenerator(feature);
-                if (!d) return null;
-                return (
-                  <path
-                    key={idx}
-                    d={d}
-                    fill="#1a2029"
-                    stroke="#2a3340"
-                    strokeWidth="0.5"
-                    className="transition-colors duration-200"
-                  />
-                );
-              })}
-            </g>
-          )}
-
-          {/* Equatorial and Meridian Reference Lines */}
-          <line
-            x1="0"
-            y1={dimensions.height / 2}
-            x2={dimensions.width}
-            y2={dimensions.height / 2}
-            stroke="#2a3340"
-            strokeWidth="0.5"
-            strokeDasharray="3 3"
-            opacity="0.25"
-          />
-          <line
-            x1={dimensions.width / 2}
-            y1="0"
-            x2={dimensions.width / 2}
-            y2={dimensions.height}
-            stroke="#2a3340"
-            strokeWidth="0.5"
-            strokeDasharray="3 3"
-            opacity="0.25"
-          />
-
-          {/* Hotspot City Nodes */}
-          {MONITORED_CITIES.map((c) => {
-            const { x, y } = getXY(c.lat, c.lon);
-            // Handle off-screen projection safely
-            if (x === 0 && y === 0) return null;
-
-            const isSelected = selectedCity.toLowerCase() === c.city.toLowerCase();
-            const isHovered = hoveredCity?.toLowerCase() === c.city.toLowerCase();
-            const details = getCityDetails(c.city);
-            const aqiLevel = details?.aqi?.aqi ?? 50;
-
-            // AQI indicator color (Strict status matching WCAG/contrast rules)
-            let colorHex = '#10b981'; // Good (Emerald)
-            if (aqiLevel > 100) colorHex = '#ef4444'; // Bad (Red)
-            else if (aqiLevel > 50) colorHex = '#f59e0b'; // Moderate (Amber)
-
-            return (
-              <g
-                key={c.city}
-                className="cursor-pointer"
-                onClick={() => {
-                  if (wasDragged.current) return;
-                  onSelectCity(c.city);
-                }}
-              >
-                {/* Soft low-opacity halo behind the dot for a beautiful pulsing glow effect */}
-                <circle
-                  cx={x}
-                  cy={y}
-                  r={isHovered || isSelected ? 12 : 8}
-                  fill={colorHex}
-                  className="opacity-20 animate-pulse"
-                  style={{ transition: 'r 0.2s ease-out' }}
-                />
-
-                {/* Small solid dot in status color */}
-                <circle
-                  cx={x}
-                  cy={y}
-                  r={isHovered || isSelected ? 5 : 3.5}
-                  fill={colorHex}
-                  stroke="#0d1117"
-                  strokeWidth="1.5"
-                  className="transition-all duration-200"
-                  onMouseEnter={() => setHoveredCity(c.city)}
-                  onMouseLeave={() => setHoveredCity(null)}
-                />
-
-                {/* Quiet outer selection outline ring */}
-                {isSelected && (
-                  <circle
-                    cx={x}
-                    cy={y}
-                    r="9"
-                    fill="none"
-                    stroke="#f59e0b"
-                    strokeWidth="1.5"
-                    className="animate-ping opacity-70"
-                    style={{ animationDuration: '3s' }}
-                  />
-                )}
-
-                {/* Site Name Text Label (shows on hover or when selected) */}
-                {(isHovered || isSelected) && (
-                  <text
-                    x={x + 9}
-                    y={y + 3}
-                    className="font-sans font-semibold text-[10px] pointer-events-none select-none"
-                    fill="#f1f5f9"
-                    style={{ textShadow: '1px 1px 3px rgba(0,0,0,0.9)' }}
-                  >
-                    {c.city}
-                  </text>
-                )}
-              </g>
-            );
-          })}
-        </g>
-      </svg>
-
-      {/* Floating Detail Card on Hover */}
-      {hoveredCity && activeCityDetails && activeXY && (
-        <div
-          className="absolute z-20 pointer-events-none p-3.5 bg-[#141922]/95 border border-[#2a3340] rounded-2xl shadow-xl backdrop-blur-md animate-slide-up"
-          style={{
-            left: `${Math.min(dimensions.width - 240, Math.max(20, activeXY.x - 110))}px`,
-            top: `${Math.min(dimensions.height - 180, Math.max(40, activeXY.y - 150))}px`,
-            width: '220px',
-          }}
-        >
-          <div className="flex items-center justify-between gap-1 mb-2">
-            <div>
-              <h4 className="font-sans font-semibold text-xs text-slate-100 tracking-tight">{hoveredCity}</h4>
-              <p className="font-mono text-[9px] text-slate-400 uppercase">
-                {MONITORED_CITIES.find((c) => c.city === hoveredCity)?.country}
-              </p>
-            </div>
-            {activeCityDetails.aqi && (
-              <span className={`px-2 py-0.5 rounded-full text-[9px] font-mono font-bold border ${activeCityDetails.aqi.status === 'Good' ? 'bg-status-success-bg/20 text-status-success border-status-success/35' :
-                activeCityDetails.aqi.status === 'Moderate' ? 'bg-status-warning-bg/20 text-status-warning border-status-warning/35' :
-                  'bg-status-danger-bg/20 text-status-danger border-status-danger/35'
-                }`}>
-                AQI {activeCityDetails.aqi.aqi}
-              </span>
-            )}
-          </div>
-
-          <div className="border-t border-[#2a3340] my-1.5" />
-
-          <div className="grid grid-cols-2 gap-2 text-slate-200">
-            {activeCityDetails.weather && (
-              <div className="flex items-center gap-1.5">
-                <Thermometer weight="light" className="text-sm text-status-warning" size={14} />
-                <div>
-                  <p className="font-mono text-[10px] leading-tight font-bold">{formatTempTooltip(activeCityDetails.weather.temp)}</p>
-                  <p className="text-[8px] text-slate-400 leading-tight font-medium">{activeCityDetails.weather.condition}</p>
-                </div>
-              </div>
-            )}
-            {activeCityDetails.aqi && (
-              <div className="flex items-center gap-1.5">
-                <Wind weight="light" className="text-sm text-status-accent" size={14} />
-                <div>
-                  <p className="font-mono text-[10px] leading-tight font-bold">{activeCityDetails.aqi.pm25} µg</p>
-                  <p className="text-[8px] text-slate-400 leading-tight font-medium">PM2.5</p>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center gap-1.5 mt-2 pt-1 border-t border-[#2a3340]/50 text-[8px] text-slate-400 font-medium">
-            <Clock weight="light" className="text-[11px]" size={11} />
-            <span>Timezone: {activeCityDetails.weather?.timezone}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Tightened Multi-row/Responsive Legend */}
-      <div className="absolute bottom-4 left-6 flex flex-wrap items-center gap-2 max-w-[85%] text-[9px] sm:text-[10px] font-sans text-slate-400 font-medium z-10">
-        <div className="flex items-center gap-1 bg-[#1a2029]/95 px-2 py-0.5 rounded-full border border-[#2a3340]/60 backdrop-blur-xs">
-          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#10b981' }} />
-          <span>Good (0-50)</span>
-        </div>
-        <div className="flex items-center gap-1 bg-[#1a2029]/95 px-2 py-0.5 rounded-full border border-[#2a3340]/60 backdrop-blur-xs">
-          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#eab308' }} />
-          <span>Moderate (51-100)</span>
-        </div>
-        <div className="flex items-center gap-1 bg-[#1a2029]/95 px-2 py-0.5 rounded-full border border-[#2a3340]/60 backdrop-blur-xs">
-          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#f97316' }} />
-          <span>Unhealthy for Sensitive Groups (101-150)</span>
-        </div>
-        <div className="flex items-center gap-1 bg-[#1a2029]/95 px-2 py-0.5 rounded-full border border-[#2a3340]/60 backdrop-blur-xs">
-          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#ef4444' }} />
-          <span>Unhealthy (151-200)</span>
-        </div>
-        <div className="flex items-center gap-1 bg-[#1a2029]/95 px-2 py-0.5 rounded-full border border-[#2a3340]/60 backdrop-blur-xs">
-          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#a855f7' }} />
-          <span>Very Unhealthy (201-300)</span>
-        </div>
-        <div className="flex items-center gap-1 bg-[#1a2029]/95 px-2 py-0.5 rounded-full border border-[#2a3340]/60 backdrop-blur-xs">
-          <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#991b1b' }} />
-          <span>Hazardous (301-500)</span>
-        </div>
-      </div>
-
-      <div className="absolute bottom-4 right-6 text-[10px] font-sans text-slate-410 font-semibold hidden lg:block z-10 bg-[#1a2029]/80 px-2.5 py-0.5 rounded-full border border-[#2a3340]/50 backdrop-blur-xs">
-        Click a location to view details
-      </div>
+      {summary}
     </div>
   );
 }

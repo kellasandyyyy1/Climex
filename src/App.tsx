@@ -8,10 +8,23 @@ import { motion, AnimatePresence } from 'motion/react';
 import ThemeToggle from './components/ThemeToggle';
 import SplashView from './components/SplashView';
 import MapPanel from './components/MapPanel';
-import StatGauge from './components/StatGauge';
 import CalendarGrid from './components/CalendarGrid';
 import { PriceTrendChart, CurrencyHistoryChart, CountryGrowthChart, AQITrendChart } from './components/MetricCharts';
 import { SyncStatusWidget } from './components/SyncStatusWidget';
+import StatusBadge, { StatusIcon, aqiTone } from './components/StatusBadge';
+import { pathForTab, tabFromPath, isModifiedClick, NOT_FOUND_TAB } from './lib/routes';
+import AlertsItem from './components/AlertsItem';
+import DashboardPriceCard from './components/DashboardPriceCard';
+import DashboardAirCard from './components/DashboardAirCard';
+import PageSkeleton from './components/PageSkeleton';
+import Freshness from './components/Freshness';
+import Wordmark from './components/Wordmark';
+import { loadDashboard, loadSavedDashboard, SECTIONS, type SectionKey, type SectionMeta } from './lib/offlineData';
+import { FEATURES } from './lib/features';
+import SearchHighlight, { SEARCH_GROUP_LABELS, SEARCH_SUGGESTIONS } from './components/SearchHighlight';
+import { SettingsSection, SettingsRow, SettingsSelect, SettingsSwitch } from './components/SettingsControls';
+import PrivacyPolicy from './components/PrivacyPolicy';
+import AqiHealthGuidance, { AqiScaleBar, aqiShortLabel } from './components/AqiHealthGuidance';
 import { telemetryLabels } from './telemetryLabels';
 import {
   Coins,
@@ -36,8 +49,10 @@ import {
   WarningCircle,
   Info,
   Cat,
+  Bell,
   Database,
   CaretLeft,
+  CaretRight,
   Pencil,
   Wind,
   Sun,
@@ -45,12 +60,15 @@ import {
   CloudRain,
   CloudLightning,
   CloudSnow
-} from '@phosphor-icons/react';
+} from './components/Icon';
 
-const PhosphorIcon = ({ name, className = "text-base", size = 16, weight = "light" }: { name: string; className?: string; size?: number; weight?: "thin" | "light" | "regular" | "bold" | "fill" | "duotone" }) => {
+const PhosphorIcon = ({ name, className = "text-base", size = 16, weight = "regular" }: { name: string; className?: string; size?: number; weight?: "thin" | "light" | "regular" | "bold" | "fill" | "duotone" }) => {
   const norm = name.toLowerCase().trim();
   if (norm.includes('wind')) {
     return <Wind className={className} size={size} weight={weight} />;
+  }
+  if (norm.includes('chevron-right') || norm.includes('caret-right')) {
+    return <CaretRight className={className} size={size} weight={weight} />;
   }
   if (norm.includes('chevron-left') || norm.includes('caret-left')) {
     return <CaretLeft className={className} size={size} weight={weight} />;
@@ -79,10 +97,10 @@ const PhosphorIcon = ({ name, className = "text-base", size = 16, weight = "ligh
   if (norm.includes('compass')) {
     return <Compass className={className} size={size} weight={weight} />;
   }
-  if (norm.includes('chevron-down')) {
+  if (norm.includes('chevron-down') || norm.includes('caret-down')) {
     return <CaretDown className={className} size={size} weight={weight} />;
   }
-  if (norm.includes('chevron-up')) {
+  if (norm.includes('chevron-up') || norm.includes('caret-up')) {
     return <CaretUp className={className} size={size} weight={weight} />;
   }
   if (norm.includes('file') || norm.includes('reports')) {
@@ -127,9 +145,54 @@ const PhosphorIcon = ({ name, className = "text-base", size = 16, weight = "ligh
   if (norm.includes('data') || norm.includes('database') || norm.includes('hard-drive')) {
     return <Database className={className} size={size} weight={weight} />;
   }
+  if (norm.includes('bell') || norm.includes('updates')) {
+    return <Bell className={className} size={size} weight={weight} />;
+  }
+  if (norm.includes('warning') || norm.includes('alert')) {
+    return <WarningCircle className={className} size={size} weight={weight} />;
+  }
   // Fallbacks
   return <Info className={className} size={size} weight={weight} />;
 };
+// Navigation: Explore menu entries (desktop dropdown + mobile drawer) and mobile tab strip order
+const EXPLORE_ITEMS = [
+  { id: 'crypto', label: 'Crypto', icon: 'coin-stack', description: 'Prices and 24h moves for top coins' },
+  { id: 'currency', label: 'Currency', icon: 'dollar', description: 'Exchange rates and a converter' },
+  { id: 'weather', label: 'Weather', icon: 'cloud-sun', description: 'Conditions and 7-day forecasts' },
+  { id: 'aqi', label: 'Air Quality', icon: 'globe', description: 'Pollutants and health guidance' },
+  { id: 'countries', label: 'Countries', icon: 'landmark', description: 'Population and economic indicators' },
+];
+const MOBILE_TABS = [
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'updates', label: 'Updates' },
+  ...EXPLORE_ITEMS.map(({ id, label }) => ({ id, label })),
+  { id: 'reports', label: 'Reports' },
+];
+
+// Data type behind each page, for its "Data updated …" label
+const PAGE_SECTION: Record<string, SectionKey | undefined> = {
+  crypto: 'crypto',
+  currency: 'currency',
+  weather: 'weather',
+  aqi: 'aqi',
+  countries: 'countries',
+};
+
+// Page heading + one-line description shown in the header stripe for each tab
+const PAGE_META: Record<string, { title: string; description: string }> = {
+  updates: { title: 'Updates', description: 'Every alert and insight from markets, weather and air quality.' },
+  notfound: { title: 'Page not found', description: 'That address doesn’t match a page in Climex.' },
+  crypto: { title: 'Crypto', description: 'Live prices, 24h movement and trends for the top digital assets.' },
+  weather: { title: 'Weather', description: 'Current conditions and the 7-day outlook for tracked cities.' },
+  currency: { title: 'Currency', description: 'Convert between currencies and follow exchange-rate trends.' },
+  aqi: { title: 'Air Quality', description: 'Pollutant levels and health guidance for monitored cities.' },
+  countries: { title: 'Countries', description: 'Population, economy and growth indicators by country.' },
+  reports: { title: 'Reports', description: 'Download data logs as CSV, one at a time or combined.' },
+  settings: { title: 'Settings', description: 'Preferences for units, refresh rate and display.' },
+  admin: { title: 'Admin', description: 'System status and data source configuration.' },
+  privacy: { title: 'Privacy', description: 'How Climex handles your data.' },
+};
+
 const CryptoLogo = ({ symbol, size = 6, className = "" }: { symbol: string; size?: number; className?: string }) => {
   const [attempt, setAttempt] = React.useState(0);
   const dim = size * 4;
@@ -149,7 +212,7 @@ const CryptoLogo = ({ symbol, size = 6, className = "" }: { symbol: string; size
     return (
       <div
         style={style}
-        className={`rounded-full bg-accent-soft text-accent flex items-center justify-center font-mono font-bold text-[10px] uppercase shrink-0 ${className}`}
+        className={`rounded-full bg-accent-soft text-accent flex items-center justify-center font-mono font-bold text-[11.5px] uppercase shrink-0 ${className}`}
       >
         {symbol?.slice(0, 2) || '??'}
       </div>
@@ -172,7 +235,7 @@ const CountryFlag = ({ code, className = "w-6 h-4" }: { code: string; className?
   const [hasError, setHasError] = React.useState(false);
   if (hasError || !code) {
     return (
-      <div className={`rounded bg-zinc-200 dark:bg-zinc-800 flex items-center justify-center font-mono font-bold text-[9px] text-zinc-500 uppercase ${className}`}>
+      <div className={`rounded bg-zinc-200 dark:bg-zinc-800 flex items-center justify-center font-mono font-bold text-[10.5px] text-zinc-500 uppercase ${className}`}>
         {code || '??'}
       </div>
     );
@@ -318,9 +381,47 @@ const getWeatherIcon = (code: number) => {
 };
 
 export default function App() {
-  const [showDashboard, setShowDashboard] = useState(false);
-  const [activeTab, setActiveTab] = useState('dashboard');
-  const [data, setData] = useState<DashboardData | null>(null);
+  // The URL is the source of truth for the current page: "/" shows the splash, every other path a tab
+  const launchedAsApp = window.location.pathname === '/' && new URLSearchParams(window.location.search).get('source') === 'pwa';
+  if (launchedAsApp) window.history.replaceState({ tab: 'dashboard' }, '', pathForTab('dashboard'));
+  const [showDashboard, setShowDashboard] = useState(() => launchedAsApp || tabFromPath(window.location.pathname) !== null);
+  const [activeTab, setActiveTabState] = useState(() => tabFromPath(window.location.pathname) ?? 'dashboard');
+  // Navigate to a page: update state and push its URL so refresh, back/forward and shared links work
+  const setActiveTab = React.useCallback((tab: string) => {
+    setActiveTabState(tab);
+    setShowDashboard(true);
+    const path = pathForTab(tab);
+    if (window.location.pathname !== path) {
+      window.history.pushState({ tab }, '', path);
+      window.scrollTo({ top: 0 });
+    }
+  }, []);
+  const [updatesSeverity, setUpdatesSeverity] = useState<'all' | 'needs-attention' | 'fyi'>('all');
+  const [updatesCategory, setUpdatesCategory] = useState<'all' | 'crypto' | 'weather' | 'aqi' | 'currency'>('all');
+  const [updatesLimit, setUpdatesLimit] = useState(20);
+  const [dashMobileSection, setDashMobileSection] = useState<'watchlist' | 'alerts' | 'air'>('watchlist');
+  const [searchActiveIndex, setSearchActiveIndex] = useState(-1);
+  const [searchRecent, setSearchRecent] = useState<string[]>(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem('climex_recent_searches') || '[]');
+      return Array.isArray(parsed) ? parsed.filter((q): q is string => typeof q === 'string').slice(0, 5) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [settingsSection, setSettingsSection] = useState<'profile' | 'display' | 'data'>('profile');
+  const [settingsSavedKey, setSettingsSavedKey] = useState<string | null>(null);
+  const [countriesMobileSection, setCountriesMobileSection] = useState<'profile' | 'growth' | 'list'>('profile');
+  const [countriesMobileShowAll, setCountriesMobileShowAll] = useState(false);
+  const [weatherMobileSection, setWeatherMobileSection] = useState<'now' | 'forecast' | 'cities'>('now');
+  const [aqiMobileSection, setAqiMobileSection] = useState<'overview' | 'pollutants' | 'history' | 'map'>('overview');
+  const [aqiPollutantInfo, setAqiPollutantInfo] = useState<string>('pm25');
+  const [currencyMobileSection, setCurrencyMobileSection] = useState<'trend' | 'pairs' | 'details'>('trend');
+  const [savedBoot] = useState(loadSavedDashboard);
+  const [data, setData] = useState<DashboardData | null>(savedBoot.data);
+  const [sectionMeta, setSectionMeta] = useState<Partial<Record<SectionKey, SectionMeta>>>(savedBoot.meta);
+  const [fetchFailed, setFetchFailed] = useState(false);
+  const [isOffline, setIsOffline] = useState(() => typeof navigator !== 'undefined' && navigator.onLine === false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -396,7 +497,22 @@ export default function App() {
   const [ledgerCompiledTime, setLedgerCompiledTime] = useState<Date | null>(null);
 
   // Alert & Real-time connection states
-  const [alerts, setAlerts] = useState<Alert[]>([]);
+  // Alerts start from the copy saved on this device, so they're still there offline
+  const [alerts, setAlerts] = useState<Alert[]>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('climex-alerts-v1') || '[]');
+      return Array.isArray(saved) ? saved : [];
+    } catch {
+      return [];
+    }
+  });
+  useEffect(() => {
+    try {
+      if (alerts.length) localStorage.setItem('climex-alerts-v1', JSON.stringify(alerts.slice(0, 50)));
+    } catch {
+      // ignore storage errors
+    }
+  }, [alerts]);
   const [newlyArrivedIds, setNewlyArrivedIds] = useState<Set<string>>(new Set());
   const [wsStatus, setWsStatus] = useState<'connecting' | 'connected' | 'reconnecting' | 'disconnected'>('connecting');
   const [timeTick, setTimeTick] = useState(0);
@@ -418,6 +534,27 @@ export default function App() {
     return `${diffDays}d`;
   };
 
+  // Helper function to safely fetch and parse JSON API responses
+  const safeApiFetch = async (url: string, options?: RequestInit) => {
+    const response = await fetch(url, options);
+    const contentType = response.headers.get('content-type') || '';
+    const text = await response.text();
+
+    if (!response.ok) {
+      throw new Error(`Server returned HTTP ${response.status}`);
+    }
+
+    if (!contentType.includes('application/json') && !text.trim().startsWith('{') && !text.trim().startsWith('[')) {
+      throw new Error(`Received non-JSON content-type: "${contentType}" from ${url}`);
+    }
+
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      throw new Error(`Failed to parse JSON response from ${url}`);
+    }
+  };
+
   const triggerSimulation = async (
     category: string,
     severity: string,
@@ -428,7 +565,7 @@ export default function App() {
     targetEntity: string
   ) => {
     try {
-      await fetch('/api/alerts/simulate', {
+      await safeApiFetch('/api/alerts/simulate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -452,6 +589,26 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const handleLocationRoute = () => {
+      if (window.location.pathname === '/privacy') {
+        setActiveTab('privacy');
+      }
+    };
+    handleLocationRoute();
+    window.addEventListener('popstate', handleLocationRoute);
+    return () => window.removeEventListener('popstate', handleLocationRoute);
+  }, []);
+
+  const navigateToTab = (tab: string, path?: string, e?: React.MouseEvent) => {
+    if (e) e.preventDefault();
+    if (path) {
+      window.history.pushState({}, '', path);
+    }
+    setActiveTab(tab);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  useEffect(() => {
     let socket: WebSocket | null = null;
     let reconnectTimeout: any = null;
     let fallbackPollInterval: any = null;
@@ -461,9 +618,7 @@ export default function App() {
       if (fallbackPollInterval) clearInterval(fallbackPollInterval);
       fallbackPollInterval = setInterval(async () => {
         try {
-          const response = await fetch('/api/alerts');
-          if (!response.ok) throw new Error('Polling failed');
-          const data = await response.json();
+          const data = await safeApiFetch('/api/alerts');
           if (isMounted && data && Array.isArray(data.alerts)) {
             setAlerts(data.alerts);
           }
@@ -567,12 +722,9 @@ export default function App() {
 
     const fetchInitial = async () => {
       try {
-        const response = await fetch('/api/alerts');
-        if (response.ok) {
-          const data = await response.json();
-          if (isMounted && data && Array.isArray(data.alerts)) {
-            setAlerts(data.alerts);
-          }
+        const data = await safeApiFetch('/api/alerts');
+        if (isMounted && data && Array.isArray(data.alerts)) {
+          setAlerts(data.alerts);
         }
       } catch (e) {
         console.warn('Initial alerts fetch not active (handled):', e);
@@ -627,6 +779,39 @@ export default function App() {
   const searchInputRef = React.useRef<HTMLInputElement>(null);
   const mobileSearchInputRef = React.useRef<HTMLInputElement>(null);
 
+  useEffect(() => {
+    if (!FEATURES.appBadge || !('setAppBadge' in navigator)) return;
+    const count = alerts.filter(a => a.severity === 'needs-attention').length;
+    (count > 0 ? (navigator as any).setAppBadge(count) : (navigator as any).clearAppBadge?.())?.catch?.(() => undefined);
+  }, [alerts]);
+
+  // Browser back/forward: follow the URL
+  React.useEffect(() => {
+    const onPopState = () => {
+      const tab = tabFromPath(window.location.pathname);
+      if (tab === null) {
+        setShowDashboard(false);
+        return;
+      }
+      setActiveTabState(tab);
+      setShowDashboard(true);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  // Tab title follows the current page
+  React.useEffect(() => {
+    document.title = !showDashboard
+      ? 'Climex — Real-time market and climate dashboard'
+      : `${activeTab === 'dashboard' ? 'Dashboard' : PAGE_META[activeTab]?.title ?? 'Page not found'} · Climex`;
+  }, [activeTab, showDashboard]);
+
+  // Keep the active mobile tab visible in the horizontally scrolling tab strip
+  React.useEffect(() => {
+    document.getElementById(`mobile-tab-${activeTab}`)?.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
+  }, [activeTab]);
+
   React.useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
@@ -645,6 +830,7 @@ export default function App() {
         setShowSearchResults(false);
         setExploreDropdownOpen(false);
         setSyncStatusDropdownOpen(false);
+        setMobileMenuOpen(false);
       }
 
       // Ctrl+K or Cmd+K shortcut to focus search input
@@ -811,7 +997,14 @@ export default function App() {
       }
     });
 
-    return results.slice(0, 8); // Limit to top 8 matching results
+    // Results stay grouped by type (insertion order); cap each type so one group can't crowd out the others
+    const searchPerType: Record<string, number> = {};
+    return results
+      .filter(r => {
+        searchPerType[r.type] = (searchPerType[r.type] || 0) + 1;
+        return searchPerType[r.type] <= 4;
+      })
+      .slice(0, 14);
   };
 
   // Dynamic greeting based on current local hour
@@ -890,6 +1083,23 @@ export default function App() {
   // 3. Clearly-labeled default city (New York)
   useEffect(() => {
     const saved = localStorage.getItem('climex_profile_location');
+    let savedGps: { lat: number; lon: number; city: string } | null = null;
+    try {
+      savedGps = JSON.parse(localStorage.getItem('climex_location_v1') || 'null');
+    } catch {
+      savedGps = null;
+    }
+    const useSavedGps = () => {
+      if (!savedGps?.city) return false;
+      const found = MONITORED_CITIES.find(c => c.city === savedGps!.city);
+      rawSetSelectedCity(savedGps.city);
+      if (found) setSelectedCountryCode(found.code);
+      setLocationSource('gps');
+      return true;
+    };
+    const isStandalone = window.matchMedia?.('(display-mode: standalone)').matches || (navigator as any).standalone === true;
+    // Offline, or relaunching the installed app: use the saved location instead of asking again
+    if ((!navigator.onLine || isStandalone) && useSavedGps()) return;
 
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -909,10 +1119,21 @@ export default function App() {
           rawSetSelectedCity(closestCity.city);
           setSelectedCountryCode(closestCity.code);
           setLocationSource('gps');
-          console.log(`Geolocation matched closest city: ${closestCity.city}`);
+          try {
+            // Stored on this device only, rounded to ~1 km
+            localStorage.setItem('climex_location_v1', JSON.stringify({
+              lat: Math.round(latitude * 100) / 100,
+              lon: Math.round(longitude * 100) / 100,
+              city: closestCity.city,
+              savedAt: Date.now(),
+            }));
+          } catch {
+            // ignore storage errors
+          }
         },
         (error) => {
-          console.log('Geolocation permission denied or failed. Falling back.');
+          // Denied, timed out or offline: last saved location, then saved city, then the default (changeable via city search)
+          if (useSavedGps()) return;
           if (saved) {
             rawSetSelectedCity(saved);
             const found = MONITORED_CITIES.find(c => c.city.toLowerCase() === saved.toLowerCase());
@@ -927,6 +1148,7 @@ export default function App() {
         { timeout: 4000, maximumAge: 300000 }
       );
     } else {
+      if (useSavedGps()) return;
       if (saved) {
         rawSetSelectedCity(saved);
         const found = MONITORED_CITIES.find(c => c.city.toLowerCase() === saved.toLowerCase());
@@ -946,29 +1168,54 @@ export default function App() {
     else setLoading(true);
 
     try {
-      const response = await fetch('/api/dashboard');
-      if (!response.ok) {
-        throw new Error(`Failed to compile statistics: Server returned status ${response.status}`);
+      // Each data type loads separately; anything that fails is shown from its saved copy
+      const result = await loadDashboard();
+      if (result.data) {
+        setData(result.data);
+        setSectionMeta(result.meta);
+        const allLive = result.failed.length === 0;
+        setLastSyncedTime(allLive ? new Date() : new Date(Math.min(...Object.values(result.meta).map(m => m!.fetchedAt))));
+        setError(null);
+      } else if (!data) {
+        setError(result.failed.length ? `Couldn't load ${result.failed.join(', ')}` : 'An unknown server error occurred');
       }
-      const json = await response.json();
-      setData(json);
-      setLastSyncedTime(new Date());
-      setError(null);
+      setFetchFailed(result.failed.length > 0);
     } catch (err) {
-      console.error(err);
-      setError(err instanceof Error ? err.message : 'An unknown server error occurred');
+      console.error('Failed to fetch live dashboard statistics:', err);
+      setFetchFailed(true);
+      if (!data) setError(err instanceof Error ? err.message : 'An unknown server error occurred');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
 
-  // Fetch once initially when splash screen launches
+  // Load fresh data once the dashboard opens (a saved copy may already be on screen)
+  const initialFetchDone = React.useRef(false);
   useEffect(() => {
-    if (showDashboard && !data) {
+    if (showDashboard && !initialFetchDone.current) {
+      initialFetchDone.current = true;
       fetchDashboardData();
     }
-  }, [showDashboard, data]);
+  }, [showDashboard]);
+
+  // Connectivity: show the offline banner, and refresh everything when the connection comes back
+  useEffect(() => {
+    const goOffline = () => setIsOffline(true);
+    const goOnline = () => {
+      setIsOffline(false);
+      fetchDashboardData(true);
+      safeApiFetch('/api/alerts')
+        .then(res => res && Array.isArray(res.alerts) && setAlerts(res.alerts))
+        .catch(() => undefined);
+    };
+    window.addEventListener('offline', goOffline);
+    window.addEventListener('online', goOnline);
+    return () => {
+      window.removeEventListener('offline', goOffline);
+      window.removeEventListener('online', goOnline);
+    };
+  }, []);
 
   // Handle active dashboard tab polling and live refresh
   useEffect(() => {
@@ -1045,7 +1292,7 @@ export default function App() {
       <SplashView
         onLaunch={() => {
           localStorage.setItem('climex_name_prompt_dismissed', 'true');
-          setShowDashboard(true);
+          setActiveTab('dashboard');
         }}
       />
     );
@@ -1194,521 +1441,626 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col relative bg-surface-0 text-text-primary" id="climex-dashboard-container">
-      {/* Glow Ambient behind top-right of bento */}
-      <div className="ambient-glow" />
 
       {/* Main Header Nav */}
-      <header className="sticky top-0 z-30 border-b border-border-hairline bg-surface-0/85 backdrop-blur-md px-3 py-2.5 md:px-6 md:py-4 flex justify-center w-full animate-fade-in" id="climex-main-header">
-        <div className="max-w-7xl w-full flex items-center justify-between gap-3 md:gap-6" id="climex-main-header-inner">
-          {/* If mobileSearchExpanded is active (on mobile), show full search bar only */}
-          {mobileSearchExpanded ? (
-            <div ref={searchRef} className="flex items-center gap-3 w-full animate-fade-in">
-              <button
-                onClick={() => {
-                  setMobileSearchExpanded(false);
-                  setGlobalSearchQuery('');
-                }}
-                className="w-9 h-9 rounded-full flex items-center justify-center border border-border-hairline bg-surface-1 text-text-secondary hover:text-text-primary active:scale-95 transition-all cursor-pointer"
-                title="Back"
-              >
-                <PhosphorIcon name="chevron-left" className="text-base" />
-              </button>
-              <div className="relative flex-1">
-                <PhosphorIcon name="search" className="text-base absolute left-3.5 top-1/2 -translate-y-1/2 text-text-secondary" />
-                <input
-                  ref={mobileSearchInputRef}
-                  type="text"
-                  autoFocus
-                  placeholder="Search assets, locations, or reports..."
-                  className="w-full bg-surface-2 border border-border-hairline focus:bg-surface-1 focus:border-border-strong rounded-full pl-10 pr-8 py-2 font-sans text-xs focus:outline-none transition-all duration-300 text-text-primary shadow-inner"
-                  value={globalSearchQuery}
-                  onChange={(e) => {
-                    setGlobalSearchQuery(e.target.value);
-                    setShowSearchResults(true);
-                  }}
-                  onFocus={() => setShowSearchResults(true)}
-                />
-                {globalSearchQuery && (
-                  <button
-                    onClick={() => setGlobalSearchQuery('')}
-                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary cursor-pointer flex items-center justify-center"
-                  >
-                    <PhosphorIcon name="x" className="text-sm" />
-                  </button>
-                )}
+      {(() => {
+        const exploreIds = EXPLORE_ITEMS.map(i => i.id);
+        const goTo = (id: string) => {
+          setActiveTab(id);
+          setExploreDropdownOpen(false);
+          setMobileMenuOpen(false);
+          setGlobalSearchQuery('');
+          setShowSearchResults(false);
+        };
+        const shortcutLabel = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K';
+        // Real links: plain clicks navigate in-app, modified clicks (new tab/window) are left to the browser
+        const linkTo = (id: string) => ({
+          href: pathForTab(id),
+          onClick: (e: React.MouseEvent) => {
+            if (isModifiedClick(e)) return;
+            e.preventDefault();
+            goTo(id);
+          },
+        });
+        const needsAttentionCount = alerts.filter(a => a.severity === 'needs-attention').length;
 
-                <AnimatePresence>
-                  {showSearchResults && globalSearchQuery && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 8 }}
-                      className="absolute top-full left-0 w-full mt-2 bg-surface-1/95 border border-border-hairline rounded-3xl p-3 shadow-xl z-50 backdrop-blur-md max-h-[320px] overflow-y-auto flex flex-col gap-1 scrollbar-thin"
-                    >
-                      {matchedSearchResults.length > 0 ? (
-                        matchedSearchResults.map(result => (
-                          <button
-                            key={result.id}
-                            onClick={() => {
-                              result.action();
-                              setMobileSearchExpanded(false);
-                            }}
-                            className="flex items-center justify-between p-2 rounded-xl hover:bg-surface-2 text-left transition-colors cursor-pointer group w-full"
-                          >
-                            <div className="flex items-center gap-2.5">
-                              <div className="w-7 h-7 rounded-lg bg-surface-2 border border-border-hairline flex items-center justify-center">
-                                <PhosphorIcon name={result.icon} className="text-sm" />
-                              </div>
-                              <div>
-                                <p className="font-sans font-semibold text-xs text-text-primary group-hover:text-status-accent transition-colors">{result.title}</p>
-                                <p className="text-[10px] text-text-secondary leading-tight">{result.subtitle}</p>
-                              </div>
-                            </div>
-                            <span className="text-[9px] font-mono uppercase tracking-wider text-text-muted bg-surface-2 px-1.5 py-0.5 rounded flex-shrink-0">
-                              {result.type}
-                            </span>
-                          </button>
-                        ))
-                      ) : (
-                        <div className="p-4 text-center">
-                          <p className="text-xs text-text-secondary font-medium">No results found for "{globalSearchQuery}"</p>
-                          <p className="text-[10px] text-text-muted mt-1">Try another keyword (e.g. BTC, New York, EUR)</p>
-                        </div>
-                      )}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-            </div>
-          ) : (
-            <>
-              {/* Left Section: Logo + 3-Item Nav */}
-              <div className="flex items-center gap-5">
-                {/* Logo */}
-                <div
-                  className="flex items-center gap-3 cursor-pointer select-none transition-all duration-200 hover:opacity-90"
-                  onClick={() => {
-                    setActiveTab('dashboard');
-                    setGlobalSearchQuery('');
-                    setShowSearchResults(false);
-                  }}
-                >
-                  <div className="relative">
-                    <img
-                      src="/img/v1bg.png"
-                      alt="Logo"
-                      referrerPolicy="no-referrer"
-                      onError={(e) => {
-                        e.currentTarget.style.display = 'none';
-                        const sibling = e.currentTarget.nextElementSibling as HTMLElement;
-                        if (sibling) {
-                          sibling.classList.remove('hidden');
-                          sibling.classList.add('flex');
-                        }
-                      }}
-                      className="h-9 w-auto max-w-[160px] object-contain block transition-transform duration-200 hover:scale-125 active:scale-95"
-                    />
-                    <div className="hidden items-center gap-2 px-5 py-1.5 rounded-xl border border-dashed border-border-strong/30 bg-surface-1 text-text-secondary text-xs font-mono tracking-tight font-medium h-9 transition-transform duration-200 hover:scale-105 active:scale-95">
-                      <div className="w-2 h-2 rounded-full bg-status-warning shrink-0" />
-                      <span>LOGO PLACEHOLDER</span>
-                    </div>
-                  </div>
-                </div>
+        // ---- Global search: results panel, keyboard navigation, recents ----
+        const searchHasQuery = globalSearchQuery.trim().length > 0;
+        const searchQuickLinks = [
+          ...EXPLORE_ITEMS.map(i => ({ id: i.id, label: i.label, icon: i.icon, description: i.description })),
+          { id: 'reports', label: 'Reports', icon: 'reports', description: 'Download data logs as CSV' },
+        ];
+        const searchRememberQuery = (q: string) => {
+          const v = q.trim();
+          if (!v) return;
+          const next = [v, ...searchRecent.filter(r => r.toLowerCase() !== v.toLowerCase())].slice(0, 5);
+          setSearchRecent(next);
+          try { localStorage.setItem('climex_recent_searches', JSON.stringify(next)); } catch { /* storage unavailable */ }
+        };
+        const searchClearRecent = () => {
+          setSearchRecent([]);
+          setSearchActiveIndex(-1);
+          try { localStorage.removeItem('climex_recent_searches'); } catch { /* storage unavailable */ }
+        };
+        const searchApplyQuery = (q: string) => {
+          setGlobalSearchQuery(q);
+          setShowSearchResults(true);
+          setSearchActiveIndex(q.trim() ? 0 : -1);
+        };
+        const searchOnChange = (value: string) => {
+          setGlobalSearchQuery(value);
+          setShowSearchResults(true);
+          setSearchActiveIndex(value.trim() ? 0 : -1);
+        };
+        // Flat list of keyboard-navigable entries, in the same order they are rendered
+        const searchEntries = (onPick?: () => void): Array<{ key: string; run: () => void }> =>
+          searchHasQuery
+            ? matchedSearchResults.map(r => ({
+                key: r.id,
+                run: () => {
+                  searchRememberQuery(globalSearchQuery);
+                  r.action();
+                  setSearchActiveIndex(-1);
+                  onPick?.();
+                },
+              }))
+            : [
+                ...searchRecent.map(q => ({ key: `recent-${q}`, run: () => searchApplyQuery(q) })),
+                ...searchQuickLinks.map(l => ({
+                  key: `link-${l.id}`,
+                  run: () => {
+                    goTo(l.id);
+                    setSearchActiveIndex(-1);
+                    onPick?.();
+                  },
+                })),
+              ];
+        const searchKeyDown = (onPick?: () => void) => (e: React.KeyboardEvent<HTMLInputElement>) => {
+          const entries = searchEntries(onPick);
+          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            setShowSearchResults(true);
+            if (entries.length === 0) return;
+            const next = e.key === 'ArrowDown'
+              ? (searchActiveIndex + 1) % entries.length
+              : searchActiveIndex <= 0 ? entries.length - 1 : searchActiveIndex - 1;
+            setSearchActiveIndex(next);
+            document.getElementById(`search-option-${next}`)?.scrollIntoView({ block: 'nearest' });
+          } else if (e.key === 'Enter') {
+            const target = entries[searchActiveIndex] ?? (searchHasQuery ? entries[0] : undefined);
+            if (target) {
+              e.preventDefault();
+              target.run();
+            }
+          }
+        };
+        const searchComboboxProps = {
+          role: 'combobox' as const,
+          'aria-expanded': showSearchResults,
+          'aria-controls': 'global-search-listbox',
+          'aria-autocomplete': 'list' as const,
+          'aria-activedescendant': showSearchResults && searchActiveIndex >= 0 ? `search-option-${searchActiveIndex}` : undefined,
+        };
 
-                {/* Subtle vertical divider to group navigation tabs visually */}
-                <div className="hidden lg:block w-[1px] h-5 bg-border-hairline/60" />
-
-                {/* Redesigned 3-Item Desktop Pill Navigation */}
-                <nav className="hidden lg:flex items-center gap-2.5 p-1 bg-surface-2 rounded-[20px] border border-border-hairline shadow-xs animate-fade-in" id="desktop-pill-nav">
-
-                  {/* Dashboard */}
-                  <button
-                    onClick={() => setActiveTab('dashboard')}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-[12px] font-sans font-semibold text-xs tracking-tight transition-all duration-250 ease-out active:scale-98 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-text-primary/30 ${activeTab === 'dashboard'
-                      ? 'bg-surface-1 text-text-primary border border-border-strong/10 shadow-xs font-bold hover:bg-surface-1/90 hover:scale-[1.02]'
-                      : 'text-text-secondary hover:text-text-primary hover:bg-surface-3/85 hover:scale-[1.02]'
-                      }`}
-                  >
-                    <PhosphorIcon name="grid-alt" className="text-sm" />
-                    <span>Dashboard</span>
-                  </button>
-
-                  {/* Explore with Dropdown */}
-                  <div
-                    ref={exploreRef}
-                    className="relative"
-                    onMouseEnter={() => setExploreDropdownOpen(true)}
-                    onMouseLeave={() => setExploreDropdownOpen(false)}
-                  >
-                    <button
-                      onClick={() => setExploreDropdownOpen(!exploreDropdownOpen)}
-                      className={`flex items-center gap-2 px-4 py-2 rounded-[12px] font-sans font-semibold text-xs tracking-tight transition-all duration-250 ease-out active:scale-98 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-text-primary/30 ${['crypto', 'currency', 'weather', 'aqi', 'countries'].includes(activeTab)
-                        ? 'bg-surface-1 text-text-primary border border-border-strong/10 shadow-xs font-bold hover:bg-surface-1/90 hover:scale-[1.02]'
-                        : 'text-text-secondary hover:text-text-primary hover:bg-surface-3/85 hover:scale-[1.02]'
-                        }`}
-                    >
-                      <PhosphorIcon name="compass" className="text-sm" />
-                      <span>Explore</span>
-                      <PhosphorIcon name="chevron-down" className={`text-xs transition-transform duration-200 ${exploreDropdownOpen ? 'rotate-180' : ''}`} />
-                    </button>
-
-                    <AnimatePresence>
-                      {exploreDropdownOpen && (
-                        <motion.div
-                          initial={{ opacity: 0, y: 8, scale: 0.98 }}
-                          animate={{ opacity: 1, y: 0, scale: 1 }}
-                          exit={{ opacity: 0, y: 8, scale: 0.98 }}
-                          transition={{ duration: 0.15, ease: 'easeOut' }}
-                          className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-[560px] bg-surface-1/95 border border-border-hairline rounded-3xl p-6 shadow-xl z-50 backdrop-blur-md grid grid-cols-3 gap-6 pointer-events-auto"
-                        >
-                          {/* Column 1: Markets */}
-                          <div>
-                            <span className="block text-[10px] font-mono uppercase tracking-wider text-text-muted mb-3">Markets</span>
-                            <div className="flex flex-col gap-1.5">
-                              <button
-                                onClick={() => { setActiveTab('crypto'); setExploreDropdownOpen(false); }}
-                                className="flex items-start gap-3 p-2 rounded-xl hover:bg-surface-2 text-left transition-colors cursor-pointer group w-full"
-                              >
-                                <div className="w-8 h-8 rounded-lg bg-status-warning-bg flex items-center justify-center text-status-warning group-hover:scale-105 transition-transform flex-shrink-0">
-                                  <PhosphorIcon name="coin-stack" className="text-base" />
-                                </div>
-                                <div>
-                                  <p className="font-sans font-semibold text-xs text-text-primary group-hover:text-status-accent transition-colors">Crypto</p>
-                                  <p className="text-[10px] text-text-secondary mt-0.5 leading-tight">Digital asset indices</p>
-                                </div>
-                              </button>
-
-                              <button
-                                onClick={() => { setActiveTab('currency'); setExploreDropdownOpen(false); }}
-                                className="flex items-start gap-3 p-2 rounded-xl hover:bg-surface-2 text-left transition-colors cursor-pointer group w-full"
-                              >
-                                <div className="w-8 h-8 rounded-lg bg-status-success-bg flex items-center justify-center text-status-success group-hover:scale-105 transition-transform flex-shrink-0">
-                                  <PhosphorIcon name="dollar" className="text-base" />
-                                </div>
-                                <div>
-                                  <p className="font-sans font-semibold text-xs text-text-primary group-hover:text-status-accent transition-colors">Currency</p>
-                                  <p className="text-[10px] text-text-secondary mt-0.5 leading-tight">Foreign exchange rates</p>
-                                </div>
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Column 2: Environment */}
-                          <div>
-                            <span className="block text-[10px] font-mono uppercase tracking-wider text-text-muted mb-3">Environment</span>
-                            <div className="flex flex-col gap-1.5">
-                              <button
-                                onClick={() => { setActiveTab('weather'); setExploreDropdownOpen(false); }}
-                                className="flex items-start gap-3 p-2 rounded-xl hover:bg-surface-2 text-left transition-colors cursor-pointer group w-full"
-                              >
-                                <div className="w-8 h-8 rounded-lg bg-status-info-bg flex items-center justify-center text-status-info group-hover:scale-105 transition-transform flex-shrink-0">
-                                  <PhosphorIcon name="cloud-sun" className="text-base" />
-                                </div>
-                                <div>
-                                  <p className="font-sans font-semibold text-xs text-text-primary group-hover:text-status-accent transition-colors">Weather</p>
-                                  <p className="text-[10px] text-text-secondary mt-0.5 leading-tight">Regional forecasts</p>
-                                </div>
-                              </button>
-
-                              <button
-                                onClick={() => { setActiveTab('aqi'); setExploreDropdownOpen(false); }}
-                                className="flex items-start gap-3 p-2 rounded-xl hover:bg-surface-2 text-left transition-colors cursor-pointer group w-full"
-                              >
-                                <div className="w-8 h-8 rounded-lg bg-status-accent-bg flex items-center justify-center text-status-accent group-hover:scale-105 transition-transform flex-shrink-0">
-                                  <PhosphorIcon name="globe" className="text-base" />
-                                </div>
-                                <div>
-                                  <p className="font-sans font-semibold text-xs text-text-primary group-hover:text-status-accent transition-colors">Air Quality</p>
-                                  <p className="text-[10px] text-text-secondary mt-0.5 leading-tight">Global AQI metrics</p>
-                                </div>
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* Column 3: Reference */}
-                          <div>
-                            <span className="block text-[10px] font-mono uppercase tracking-wider text-text-muted mb-3">Reference</span>
-                            <div className="flex flex-col gap-1.5">
-                              <button
-                                onClick={() => { setActiveTab('countries'); setExploreDropdownOpen(false); }}
-                                className="flex items-start gap-3 p-2 rounded-xl hover:bg-surface-2 text-left transition-colors cursor-pointer group w-full"
-                              >
-                                <div className="w-8 h-8 rounded-lg bg-status-indigo-bg flex items-center justify-center text-status-indigo group-hover:scale-105 transition-transform flex-shrink-0">
-                                  <PhosphorIcon name="landmark" className="text-base" />
-                                </div>
-                                <div>
-                                  <p className="font-sans font-semibold text-xs text-text-primary group-hover:text-status-accent transition-colors">Countries</p>
-                                  <p className="text-[10px] text-text-secondary mt-0.5 leading-tight">Sovereign stats</p>
-                                </div>
-                              </button>
-                            </div>
-                          </div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-
-                  {/* Reports */}
-                  <button
-                    onClick={() => setActiveTab('reports')}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-[12px] font-sans font-semibold text-xs tracking-tight transition-all duration-250 ease-out active:scale-98 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-text-primary/30 ${activeTab === 'reports'
-                      ? 'bg-surface-1 text-text-primary border border-border-hairline/80 shadow-xs font-bold hover:bg-surface-1/90 hover:scale-[1.02]'
-                      : 'text-text-secondary hover:text-text-primary hover:bg-surface-3/85 hover:scale-[1.02]'
-                      }`}
-                  >
-                    <PhosphorIcon name="file" className="text-sm" />
-                    <span>Reports</span>
-                  </button>
-                </nav>
-              </div>
-
-              {/* Center Section: Promoted Global Search Bar (Responsive Desktop) */}
-              <div ref={searchRef} className="hidden md:block relative flex-grow max-w-[340px] mx-auto focus-within:max-w-[385px] transition-all duration-300 ease-out">
-                <div className="relative">
-                  <PhosphorIcon name="search" className="text-base absolute left-3.5 top-1/2 -translate-y-1/2 text-text-secondary" />
-                  <input
-                    ref={searchInputRef}
-                    type="text"
-                    placeholder="Search assets, locations, or reports..."
-                    className="w-full bg-surface-2 border border-border-hairline/60 focus:bg-surface-1 focus:border-border-strong focus:ring-2 focus:ring-text-primary/15 rounded-full pl-10 pr-12 py-2 font-sans text-xs focus:outline-none transition-all duration-300 text-text-primary shadow-inner"
-                    value={globalSearchQuery}
-                    onChange={(e) => {
-                      setGlobalSearchQuery(e.target.value);
-                      setShowSearchResults(true);
-                    }}
-                    onFocus={() => setShowSearchResults(true)}
-                  />
-                  {globalSearchQuery ? (
-                    <button
-                      onClick={() => setGlobalSearchQuery('')}
-                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary cursor-pointer flex items-center justify-center animate-fade-in"
-                    >
-                      <PhosphorIcon name="x" className="text-sm" />
-                    </button>
-                  ) : (
-                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center bg-surface-3 border border-border-strong/15 text-[10px] font-sans text-text-muted px-1.5 py-0.5 rounded pointer-events-none select-none">
-                      ⌘K
-                    </div>
-                  )}
-                </div>
-
-                <AnimatePresence>
-                  {showSearchResults && globalSearchQuery && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 8 }}
-                      className="absolute top-full left-0 w-full mt-2 bg-surface-1/95 border border-border-hairline rounded-3xl p-3 shadow-xl z-50 backdrop-blur-md max-h-[320px] overflow-y-auto flex flex-col gap-1 scrollbar-thin"
-                    >
-                      {matchedSearchResults.length > 0 ? (
-                        matchedSearchResults.map(result => (
-                          <button
-                            key={result.id}
-                            onClick={result.action}
-                            className="flex items-center justify-between p-2 rounded-xl hover:bg-surface-2 text-left transition-colors cursor-pointer group w-full"
-                          >
-                            <div className="flex items-center gap-2.5">
-                              <div className="w-7 h-7 rounded-lg bg-surface-2 border border-border-hairline flex items-center justify-center">
-                                <PhosphorIcon name={result.icon} className="text-sm" />
-                              </div>
-                              <div>
-                                <p className="font-sans font-semibold text-xs text-text-primary group-hover:text-status-accent transition-colors">{result.title}</p>
-                                <p className="text-[10px] text-text-secondary leading-tight">{result.subtitle}</p>
-                              </div>
-                            </div>
-                            <span className="text-[9px] font-mono uppercase tracking-wider text-text-muted bg-surface-2 px-1.5 py-0.5 rounded flex-shrink-0">
-                              {result.type}
-                            </span>
-                          </button>
-                        ))
-                      ) : (
-                        <div className="p-4 text-center">
-                          <p className="text-xs text-text-secondary font-medium">No results found for "{globalSearchQuery}"</p>
-                          <p className="text-[10px] text-text-muted mt-1">Try another keyword (e.g. BTC, New York, EUR)</p>
-                        </div>
-                      )}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
-
-              {/* Right Section: Settings and theme toggle (No profile avatar KA) */}
-              <div className="flex items-center gap-1.5 md:gap-3">
-                {/* Search Icon Button for narrower viewports (mobile/tablet) */}
-                <button
-                  onClick={() => setMobileSearchExpanded(true)}
-                  className="md:hidden flex items-center justify-center w-9 h-9 rounded-full border border-border-hairline bg-surface-1 text-text-secondary hover:text-text-primary hover:bg-surface-2 hover:border-border-strong/40 transition-all duration-200 active:scale-95 cursor-pointer"
-                  title="Search"
-                >
-                  <PhosphorIcon name="search" className="text-base" />
-                </button>
-
-
-
-                {/* Icon 1: Theme Switcher with friendly hover/click transition - hidden on mobile */}
-                <div className="hidden md:flex items-center justify-center transition-all duration-200 active:scale-95">
-                  <ThemeToggle />
-                </div>
-
-                {/* Icon 2: Settings Button with friendly hover/click transition - hidden on mobile */}
-                <button
-                  onClick={() => setActiveTab('settings')}
-                  className={`hidden md:flex items-center justify-center w-9 h-9 rounded-full border transition-all duration-200 cursor-pointer active:scale-95 ${activeTab === 'settings'
-                    ? 'border-border-strong text-text-primary bg-surface-2'
-                    : 'border-border-hairline bg-surface-1 text-text-secondary hover:text-text-primary hover:bg-surface-2 hover:border-border-strong/40'
-                    }`}
-                  title="Settings"
-                >
-                  <PhosphorIcon name="cog" className="text-base" />
-                </button>
-
-                {/* Responsive Mobile Menu Toggle */}
-                <button
-                  onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                  className="lg:hidden w-9 h-9 flex items-center justify-center rounded-full border border-border-hairline bg-surface-1 hover:bg-surface-2 text-text-secondary hover:text-text-primary active:scale-95 cursor-pointer transition-all duration-200"
-                  aria-label="Toggle navigation menu"
-                  id="mobile-menu-toggle-btn"
-                >
-                  {mobileMenuOpen ? <PhosphorIcon name="x" className="text-base" /> : <PhosphorIcon name="menu" className="text-base" />}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      </header>
-
-      {/* Mobile Scrollable horizontal navigation tab bar */}
-      <div className="lg:hidden sticky top-[57px] md:top-[69px] z-20 w-full overflow-x-auto scrollbar-none border-b border-border-hairline bg-surface-1/90 backdrop-blur-md py-2 px-3 md:py-3 md:px-4 flex items-center gap-1.5 md:gap-2" id="mobile-scrollable-nav">
-        {[
-          { id: 'dashboard', label: 'Dashboard', icon: 'grid-alt' },
-          { id: 'crypto', label: 'Crypto', icon: 'coin-stack' },
-          { id: 'currency', label: 'Currency', icon: 'dollar' },
-          { id: 'weather', label: 'Weather', icon: 'cloud-sun' },
-          { id: 'aqi', label: 'Air Quality', icon: 'globe' },
-          { id: 'countries', label: 'Countries', icon: 'landmark' },
-          { id: 'reports', label: 'Reports', icon: 'file' },
-          { id: 'settings', label: 'Settings', icon: 'cog' }
-        ].map(item => {
-          const isActive = activeTab === item.id;
-          return (
+        const searchResultsPanel = (variant: 'desktop' | 'mobile', onPick?: () => void) => {
+          const entries = searchEntries(onPick);
+          const isMobile = variant === 'mobile';
+          const rowHeight = isMobile ? 'min-h-[52px]' : 'min-h-[44px]';
+          const option = (idx: number, icon: string, title: React.ReactNode, subtitle?: React.ReactNode, trailing?: React.ReactNode) => (
             <button
-              key={item.id}
-              onClick={() => { setActiveTab(item.id); setMobileMenuOpen(false); }}
-              className={`flex items-center gap-1 px-2.5 py-1.5 md:gap-1.5 md:px-3 md:py-2 rounded-full font-sans font-semibold text-xs whitespace-nowrap transition-all duration-150 active:scale-95 cursor-pointer ${isActive
-                ? 'bg-status-warning text-black font-bold shadow-xs'
-                : 'text-text-secondary bg-surface-2 border border-border-hairline/40 hover:text-text-primary'
-                }`}
+              key={entries[idx]?.key ?? idx}
+              id={`search-option-${idx}`}
+              type="button"
+              role="option"
+              aria-selected={idx === searchActiveIndex}
+              onMouseEnter={() => setSearchActiveIndex(idx)}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => entries[idx]?.run()}
+              className={`flex items-center gap-3 w-full ${rowHeight} px-3 py-2 rounded-lg text-left cursor-pointer transition-colors aria-selected:bg-surface-2`}
             >
-              <PhosphorIcon name={item.icon} className="text-xs md:text-sm" />
-              <span>{item.label}</span>
+              <span className="w-9 h-9 rounded-lg bg-surface-2 text-text-secondary flex items-center justify-center shrink-0" aria-hidden="true">
+                <PhosphorIcon name={icon} size={16} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[14px] font-medium text-text-primary truncate">{title}</span>
+                {subtitle && <span className="block text-[13px] text-text-muted leading-snug truncate">{subtitle}</span>}
+              </span>
+              {trailing ?? <PhosphorIcon name="caret-right" size={14} className="shrink-0 text-text-muted" />}
             </button>
           );
-        })}
-      </div>
+          const groupLabel = (label: string, right?: React.ReactNode) => (
+            <div className="flex items-center justify-between gap-2 px-3 pt-3 pb-1 text-[12.5px] font-semibold text-text-muted" role="presentation">
+              <span>{label}</span>
+              {right}
+            </div>
+          );
+          const suggestionChips = (
+            <div className="flex flex-wrap gap-2 px-3 pt-1 pb-2">
+              {SEARCH_SUGGESTIONS.map(s => (
+                <button
+                  key={s}
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => searchApplyQuery(s)}
+                  className={`inline-flex items-center gap-1.5 ${isMobile ? 'h-10' : 'h-8'} px-3 rounded-full border border-border-hairline bg-surface-1 text-[13px] text-text-secondary hover:text-text-primary hover:bg-surface-2 cursor-pointer transition-colors`}
+                >
+                  <PhosphorIcon name="search" size={12} className="text-text-muted" />
+                  {s}
+                </button>
+              ))}
+            </div>
+          );
 
-      {/* Mobile Menu Dropdown */}
-      {mobileMenuOpen && (
-        <div className="lg:hidden bg-surface-1 border-b border-border-hairline p-5 absolute top-[57px] md:top-[69px] left-0 right-0 z-40 flex flex-col gap-4 shadow-lg animate-slide-up" id="mobile-menu-dropdown">
+          // Group results by type, keeping a flat index for keyboard navigation
+          const groups: Array<{ type: string; items: Array<{ r: typeof matchedSearchResults[number]; idx: number }> }> = [];
+          matchedSearchResults.forEach((r, idx) => {
+            let g = groups.find(x => x.type === r.type);
+            if (!g) {
+              g = { type: r.type, items: [] };
+              groups.push(g);
+            }
+            g.items.push({ r, idx });
+          });
 
-          {/* Mobile Global Search */}
-          <div className="relative">
-            <PhosphorIcon name="search" className="text-sm absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
-            <input
-              type="text"
-              placeholder="Search BTC, New York, EUR..."
-              className="w-full bg-surface-2 border border-border-hairline focus:border-status-accent rounded-full pl-9 pr-4 py-2 font-sans text-xs focus:outline-none text-text-primary"
-              value={globalSearchQuery}
-              onChange={(e) => {
-                setGlobalSearchQuery(e.target.value);
-                setShowSearchResults(true);
-              }}
-            />
-          </div>
+          let body: React.ReactNode;
+          if (searchHasQuery && !data) {
+            body = (
+              <div className="px-4 py-8 text-center">
+                <p className="text-[14px] font-medium text-text-primary">Loading data…</p>
+                <p className="text-[13px] text-text-muted mt-1">Results will appear as soon as live data arrives.</p>
+              </div>
+            );
+          } else if (searchHasQuery && matchedSearchResults.length === 0) {
+            body = (
+              <div className="py-6">
+                <div className="px-4 text-center">
+                  <span className="mx-auto w-10 h-10 rounded-full bg-surface-2 text-text-muted flex items-center justify-center">
+                    <PhosphorIcon name="search" size={18} />
+                  </span>
+                  <p className="mt-3 text-[14px] font-medium text-text-primary break-words">No results for “{globalSearchQuery.trim()}”</p>
+                  <p className="text-[13px] text-text-muted mt-1">Check the spelling, or try a coin, city, currency or country.</p>
+                </div>
+                <div className="mt-4">
+                  {groupLabel('Try searching for')}
+                  {suggestionChips}
+                </div>
+              </div>
+            );
+          } else if (searchHasQuery) {
+            body = groups.map(g => (
+              <div key={g.type} role="group" aria-label={SEARCH_GROUP_LABELS[g.type] ?? g.type}>
+                {groupLabel(SEARCH_GROUP_LABELS[g.type] ?? g.type, <span className="font-normal tabular-nums">{g.items.length}</span>)}
+                {g.items.map(({ r, idx }) =>
+                  option(
+                    idx,
+                    r.icon,
+                    <SearchHighlight text={r.title} query={globalSearchQuery} />,
+                    <SearchHighlight text={r.subtitle} query={globalSearchQuery} />
+                  )
+                )}
+              </div>
+            ));
+          } else {
+            body = (
+              <>
+                {searchRecent.length > 0 && (
+                  <div role="group" aria-label="Recent searches">
+                    {groupLabel(
+                      'Recent searches',
+                      <button
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={searchClearRecent}
+                        className="font-medium text-text-secondary hover:text-text-primary cursor-pointer px-1 -mx-1 rounded"
+                      >
+                        Clear
+                      </button>
+                    )}
+                    {searchRecent.map((q, i) => option(i, 'clock', q, undefined, <span className="text-[12.5px] text-text-muted shrink-0">Search</span>))}
+                  </div>
+                )}
+                {searchRecent.length === 0 && (
+                  <div>
+                    {groupLabel('Try searching for')}
+                    {suggestionChips}
+                  </div>
+                )}
+                <div role="group" aria-label="Jump to">
+                  {groupLabel('Jump to')}
+                  {searchQuickLinks.map((l, i) => option(searchRecent.length + i, l.icon, l.label, l.description))}
+                </div>
+              </>
+            );
+          }
 
-          <div className="flex flex-col gap-1">
-            <button
-              onClick={() => { setActiveTab('dashboard'); setMobileMenuOpen(false); }}
-              className={`flex items-center gap-3 px-4 py-2.5 rounded-xl font-sans font-semibold text-xs tracking-tight transition-all text-left cursor-pointer ${activeTab === 'dashboard'
-                ? 'bg-surface-2 text-text-primary border border-border-hairline/45 font-bold shadow-xs'
-                : 'text-text-secondary hover:bg-surface-2/50'
-                }`}
-            >
-              <PhosphorIcon name="grid-alt" className="text-base" />
-              <span>Dashboard</span>
-            </button>
+          return (
+            <AnimatePresence>
+              {showSearchResults && (
+                <motion.div
+                  initial={{ opacity: 0, y: isMobile ? 0 : 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: isMobile ? 0 : 6 }}
+                  transition={{ duration: 0.12 }}
+                  id="global-search-listbox"
+                  role="listbox"
+                  aria-label="Search results"
+                  className={
+                    isMobile
+                      ? 'absolute left-0 right-0 top-full h-[calc(100dvh-3.5rem)] bg-surface-1 border-t border-border-hairline overflow-y-auto overscroll-contain z-50 px-2 pb-6 flex flex-col'
+                      : 'absolute top-full left-0 w-full min-w-[360px] mt-2 bg-surface-1 border border-border-hairline rounded-xl shadow-lg z-50 flex flex-col overflow-hidden'
+                  }
+                >
+                  <div className={isMobile ? '' : 'max-h-[min(460px,70vh)] overflow-y-auto p-1.5'}>{body}</div>
+                  {!isMobile && entries.length > 0 && (
+                    <div className="flex items-center gap-3 px-3 py-2 border-t border-border-hairline bg-surface-2/60 text-[12px] text-text-muted">
+                      <span className="inline-flex items-center gap-1">
+                        <kbd className="h-5 min-w-5 px-1 inline-flex items-center justify-center rounded border border-border-hairline bg-surface-1 font-sans text-[12px]">↑</kbd>
+                        <kbd className="h-5 min-w-5 px-1 inline-flex items-center justify-center rounded border border-border-hairline bg-surface-1 font-sans text-[12px]">↓</kbd>
+                        to navigate
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <kbd className="h-5 px-1 inline-flex items-center justify-center rounded border border-border-hairline bg-surface-1 font-sans text-[12px]">Enter</kbd>
+                        to open
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <kbd className="h-5 px-1 inline-flex items-center justify-center rounded border border-border-hairline bg-surface-1 font-sans text-[12px]">Esc</kbd>
+                        to close
+                      </span>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          );
+        };
 
-            {/* Explore Group */}
-            <div className="mt-2">
-              <span className="block px-4 text-[9px] font-mono uppercase tracking-wider text-text-muted mb-1.5">Explore</span>
-              <div className="pl-4 flex flex-col gap-1 border-l border-border-hairline/50 ml-6">
-                {[
-                  { id: 'crypto', label: 'Crypto', icon: 'coin-stack' },
-                  { id: 'currency', label: 'Currency', icon: 'dollar' },
-                  { id: 'weather', label: 'Weather', icon: 'cloud-sun' },
-                  { id: 'aqi', label: 'Air Quality', icon: 'globe' },
-                  { id: 'countries', label: 'Countries', icon: 'landmark' }
-                ].map(sub => {
-                  const isSubActive = activeTab === sub.id;
-                  return (
+        const navLink = (id: string, label: string, isActive: boolean, extra?: React.ReactNode, onClick?: () => void) => {
+          const className = `relative h-9 px-3 inline-flex items-center gap-1.5 rounded-lg text-[14px] font-medium transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-accent/40 ${isActive ? 'text-text-primary' : 'text-text-secondary hover:text-text-primary hover:bg-surface-2'}`;
+          const body = (
+            <>
+              {label}
+              {extra}
+              {isActive && <span className="absolute left-3 right-3 -bottom-[14px] h-[2px] rounded-full bg-text-primary" aria-hidden="true" />}
+            </>
+          );
+          return onClick ? (
+            <button onClick={onClick} aria-current={isActive ? 'page' : undefined} className={className}>{body}</button>
+          ) : (
+            <a {...linkTo(id)} aria-current={isActive ? 'page' : undefined} className={className}>{body}</a>
+          );
+        };
+
+        return (
+          <>
+            <header className="sticky top-0 z-30 h-14 md:h-16 border-b border-border-hairline bg-surface-0/90 backdrop-blur-md px-3 md:px-6 xl:px-10 flex justify-center w-full" id="climex-main-header">
+              <div className="max-w-7xl xl:max-w-[1840px] w-full h-full flex items-center justify-between gap-3 md:gap-6 min-[1680px]:grid min-[1680px]:grid-cols-[minmax(0,1fr)_480px_minmax(0,1fr)]" id="climex-main-header-inner">
+                {mobileSearchExpanded ? (
+                  /* Mobile: full-width search */
+                  <div ref={searchRef} className="flex items-center gap-2 w-full min-[1680px]:col-span-3">
                     <button
-                      key={sub.id}
-                      onClick={() => { setActiveTab(sub.id); setMobileMenuOpen(false); }}
-                      className={`flex items-center gap-2.5 px-3 py-2 rounded-lg font-sans font-medium text-xs tracking-tight transition-all text-left cursor-pointer ${isSubActive
-                        ? 'bg-surface-2 text-text-primary border border-border-hairline/30 font-semibold'
-                        : 'text-text-secondary hover:text-text-primary'
+                      onClick={() => {
+                        setMobileSearchExpanded(false);
+                        setGlobalSearchQuery('');
+                        setShowSearchResults(false);
+                        setSearchActiveIndex(-1);
+                      }}
+                      className="btn btn-ghost btn-icon shrink-0 w-11 h-11"
+                      aria-label="Close search"
+                    >
+                      <PhosphorIcon name="chevron-left" size={20} />
+                    </button>
+                    <div className="relative flex-1">
+                      <PhosphorIcon name="search" size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+                      <input
+                        ref={mobileSearchInputRef}
+                        type="search"
+                        autoFocus
+                        enterKeyHint="search"
+                        placeholder="Search coins, cities, currencies…"
+                        aria-label="Search"
+                        {...searchComboboxProps}
+                        className="w-full h-11 bg-surface-1 border border-border-hairline focus:border-border-strong focus:ring-4 focus:ring-accent/10 rounded-xl pl-10 pr-11 font-sans text-[16px] focus:outline-none transition-all text-text-primary placeholder:text-text-muted [&::-webkit-search-cancel-button]:hidden"
+                        value={globalSearchQuery}
+                        onChange={(e) => searchOnChange(e.target.value)}
+                        onFocus={() => setShowSearchResults(true)}
+                        onClick={() => setShowSearchResults(true)}
+                        onKeyDown={searchKeyDown(() => setMobileSearchExpanded(false))}
+                      />
+                      {globalSearchQuery && (
+                        <button
+                          onClick={() => {
+                            searchOnChange('');
+                            mobileSearchInputRef.current?.focus();
+                          }}
+                          className="absolute right-1 top-1/2 -translate-y-1/2 w-9 h-9 rounded-lg flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-2 cursor-pointer"
+                          aria-label="Clear search"
+                        >
+                          <PhosphorIcon name="x" size={16} />
+                        </button>
+                      )}
+                    </div>
+                    {/* Results fill the screen under the header (positioned against the sticky header) */}
+                    {searchResultsPanel('mobile', () => setMobileSearchExpanded(false))}
+                  </div>
+                ) : (
+                  <>
+                    {/* Left: logo + primary navigation */}
+                    <div className="flex items-center gap-6 min-w-0">
+                      <a
+                        {...linkTo('dashboard')}
+                        className="flex items-center gap-2 shrink-0 rounded-lg -ml-1 px-1 py-1 cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-accent/40"
+                        aria-label="Climex home"
+                      >
+                        <Wordmark className="h-[17px] md:h-[19px]" />
+                      </a>
+
+                      <nav className="hidden lg:flex items-center gap-1" id="desktop-primary-nav" aria-label="Primary">
+                        {navLink('dashboard', 'Dashboard', activeTab === 'dashboard')}
+
+                        <div
+                          ref={exploreRef}
+                          className="relative"
+                          onMouseEnter={() => setExploreDropdownOpen(true)}
+                          onMouseLeave={() => setExploreDropdownOpen(false)}
+                        >
+                          {navLink(
+                            'explore',
+                            'Explore',
+                            exploreIds.includes(activeTab),
+                            <PhosphorIcon name="chevron-down" size={14} className={`text-text-muted transition-transform duration-200 ${exploreDropdownOpen ? 'rotate-180' : ''}`} />,
+                            () => setExploreDropdownOpen(!exploreDropdownOpen)
+                          )}
+
+                          <AnimatePresence>
+                            {exploreDropdownOpen && (
+                              <motion.div
+                                initial={{ opacity: 0, y: 6 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: 6 }}
+                                transition={{ duration: 0.14, ease: 'easeOut' }}
+                                className="absolute top-full left-0 pt-3 z-50"
+                              >
+                                <div className="w-[520px] bg-surface-1 border border-border-hairline rounded-xl shadow-lg overflow-hidden">
+                                  <div className="grid grid-cols-2 gap-1 p-2">
+                                    {EXPLORE_ITEMS.map(item => {
+                                      const isActive = activeTab === item.id;
+                                      return (
+                                        <a
+                                          key={item.id}
+                                          {...linkTo(item.id)}
+                                          aria-current={isActive ? 'page' : undefined}
+                                          className={`flex items-start gap-3 p-3 rounded-lg text-left transition-colors cursor-pointer ${isActive ? 'bg-surface-2' : 'hover:bg-surface-2'}`}
+                                        >
+                                          <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 border ${isActive ? 'bg-surface-1 border-border-strong text-text-primary' : 'bg-surface-2 border-transparent text-text-secondary'}`}>
+                                            <PhosphorIcon name={item.icon} size={18} />
+                                          </span>
+                                          <span className="min-w-0">
+                                            <span className="block text-sm font-medium text-text-primary">{item.label}</span>
+                                            <span className="block text-[13px] text-text-muted leading-snug mt-0.5">{item.description}</span>
+                                          </span>
+                                        </a>
+                                      );
+                                    })}
+                                  </div>
+                                  <div className="flex items-center justify-between gap-3 px-4 py-2.5 bg-surface-2/60 border-t border-border-hairline text-[12.5px] text-text-muted">
+                                    <span>Live data from public market, weather and air-quality sources.</span>
+                                    <StatusBadge tone="success" progress="complete" size="xs">Live</StatusBadge>
+                                  </div>
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </div>
+
+                        {navLink(
+                          'updates',
+                          'Updates',
+                          activeTab === 'updates',
+                          needsAttentionCount > 0 ? (
+                            <StatusBadge tone="warning" progress={null} size="xs" className="tabular-nums" title={`${needsAttentionCount} need attention`}>{needsAttentionCount}</StatusBadge>
+                          ) : undefined
+                        )}
+                        {navLink('reports', 'Reports', activeTab === 'reports')}
+                      </nav>
+                    </div>
+
+                    {/* Center: search (tablet and up) */}
+                    <div ref={searchRef} className="hidden md:block relative flex-1 max-w-[420px] ml-auto lg:flex-none lg:w-[300px] xl:w-[360px] min-[1680px]:w-full! min-[1680px]:max-w-none min-[1680px]:ml-0">
+                      <PhosphorIcon name="search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+                      <input
+                        ref={searchInputRef}
+                        type="search"
+                        placeholder="Search coins, cities…"
+                        aria-label="Search"
+                        {...searchComboboxProps}
+                        className="w-full h-9 bg-surface-1 border border-border-hairline hover:border-border-strong focus:border-border-strong focus:ring-4 focus:ring-accent/10 rounded-lg pl-9 pr-16 font-sans text-sm focus:outline-none transition-all text-text-primary placeholder:text-text-muted [&::-webkit-search-cancel-button]:hidden"
+                        value={globalSearchQuery}
+                        onChange={(e) => searchOnChange(e.target.value)}
+                        onFocus={() => setShowSearchResults(true)}
+                        onClick={() => setShowSearchResults(true)}
+                        onKeyDown={searchKeyDown()}
+                      />
+                      {globalSearchQuery ? (
+                        <button
+                          onClick={() => {
+                            searchOnChange('');
+                            searchInputRef.current?.focus();
+                          }}
+                          className="absolute right-1.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-md flex items-center justify-center text-text-muted hover:text-text-primary hover:bg-surface-2 cursor-pointer"
+                          aria-label="Clear search"
+                        >
+                          <PhosphorIcon name="x" size={14} />
+                        </button>
+                      ) : (
+                        <kbd className="absolute right-2 top-1/2 -translate-y-1/2 h-5 px-1.5 inline-flex items-center rounded-md border border-border-hairline bg-surface-2 font-sans text-[12px] font-medium text-text-muted pointer-events-none select-none">
+                          {shortcutLabel}
+                        </kbd>
+                      )}
+                      {searchResultsPanel('desktop')}
+                    </div>
+
+                    {/* Right: utilities */}
+                    <div className="flex items-center gap-1 shrink-0 min-[1680px]:justify-self-end">
+                      <button
+                        onClick={() => setMobileSearchExpanded(true)}
+                        className="md:hidden btn btn-ghost btn-icon"
+                        aria-label="Search"
+                      >
+                        <PhosphorIcon name="search" size={18} />
+                      </button>
+                      <div className="hidden md:flex">
+                        <ThemeToggle />
+                      </div>
+                      <a
+                        {...linkTo('settings')}
+                        className={`hidden md:inline-flex btn btn-ghost btn-icon ${activeTab === 'settings' ? 'bg-surface-2 text-text-primary' : ''}`}
+                        aria-label="Settings"
+                        aria-current={activeTab === 'settings' ? 'page' : undefined}
+                        title="Settings"
+                      >
+                        <PhosphorIcon name="cog" size={18} />
+                      </a>
+                      <button
+                        onClick={() => setMobileMenuOpen(true)}
+                        className="lg:hidden btn btn-ghost btn-icon"
+                        aria-label="Open menu"
+                        aria-expanded={mobileMenuOpen}
+                        id="mobile-menu-toggle-btn"
+                      >
+                        <PhosphorIcon name="menu" size={20} />
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </header>
+
+            {/* Mobile & tablet: underline tab strip */}
+            <nav className="lg:hidden sticky top-14 md:top-16 z-20 w-full bg-surface-0/90 backdrop-blur-md border-b border-border-hairline" id="mobile-scrollable-nav" aria-label="Sections">
+              <div className="flex items-center gap-1 overflow-x-auto scrollbar-none px-2 md:px-5 touch-pan-x">
+                {MOBILE_TABS.map(item => {
+                  const isActive = activeTab === item.id;
+                  return (
+                    <a
+                      key={item.id}
+                      id={`mobile-tab-${item.id}`}
+                      {...linkTo(item.id)}
+                      aria-current={isActive ? 'page' : undefined}
+                      className={`relative h-11 px-3 shrink-0 inline-flex items-center gap-1.5 text-[14px] font-medium whitespace-nowrap transition-colors cursor-pointer ${isActive ? 'text-text-primary' : 'text-text-secondary hover:text-text-primary'
                         }`}
                     >
-                      <PhosphorIcon name={sub.icon} className="text-sm" />
-                      <span>{sub.label}</span>
-                    </button>
+                      {item.label}
+                      {item.id === 'updates' && needsAttentionCount > 0 && (
+                        <StatusBadge tone="warning" progress={null} size="xs" className="tabular-nums">{needsAttentionCount}</StatusBadge>
+                      )}
+                      {isActive && <span className="absolute left-3 right-3 bottom-0 h-[2px] rounded-full bg-text-primary" aria-hidden="true" />}
+                    </a>
                   );
                 })}
               </div>
-            </div>
+            </nav>
 
-            <button
-              onClick={() => { setActiveTab('reports'); setMobileMenuOpen(false); }}
-              className={`flex items-center gap-3 px-4 py-2.5 rounded-xl font-sans font-semibold text-xs tracking-tight transition-all text-left cursor-pointer mt-2 ${activeTab === 'reports'
-                ? 'bg-surface-2 text-text-primary border border-border-hairline/45 font-bold shadow-xs'
-                : 'text-text-secondary hover:bg-surface-2/50'
-                }`}
-            >
-              <PhosphorIcon name="file" className="text-base" />
-              <span>Reports</span>
-            </button>
+            {/* Mobile & tablet: slide-in menu */}
+            <AnimatePresence>
+              {mobileMenuOpen && (
+                <div className="lg:hidden fixed inset-0 z-50" id="mobile-menu-dropdown" role="dialog" aria-modal="true" aria-label="Menu">
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute inset-0 bg-black/30"
+                    onClick={() => setMobileMenuOpen(false)}
+                  />
+                  <motion.aside
+                    initial={{ x: '100%' }}
+                    animate={{ x: 0 }}
+                    exit={{ x: '100%' }}
+                    transition={{ type: 'tween', duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                    className="absolute right-0 top-0 h-full w-[86%] max-w-[360px] bg-surface-1 border-l border-border-hairline shadow-xl flex flex-col"
+                  >
+                    <div className="h-14 px-4 flex items-center justify-between border-b border-border-hairline shrink-0">
+                      <Wordmark className="h-[17px]" />
+                      <button onClick={() => setMobileMenuOpen(false)} className="btn btn-ghost btn-icon" aria-label="Close menu">
+                        <PhosphorIcon name="x" size={18} />
+                      </button>
+                    </div>
 
-            <button
-              onClick={() => { setActiveTab('settings'); setMobileMenuOpen(false); }}
-              className={`flex items-center gap-3 px-4 py-2.5 rounded-xl font-sans font-semibold text-xs tracking-tight transition-all text-left cursor-pointer mt-2 ${activeTab === 'settings'
-                ? 'bg-surface-2 text-text-primary border border-border-hairline/45 font-bold shadow-xs'
-                : 'text-text-secondary hover:bg-surface-2/50'
-                }`}
-            >
-              <PhosphorIcon name="cog" className="text-base" />
-              <span>Settings</span>
-            </button>
-          </div>
+                    <div className="flex-1 overflow-y-auto px-3 py-4 flex flex-col gap-5">
+                      <button
+                        onClick={() => {
+                          setMobileMenuOpen(false);
+                          setMobileSearchExpanded(true);
+                        }}
+                        className="w-full h-10 px-3 flex items-center gap-2 rounded-lg border border-border-hairline bg-surface-0 text-[15px] text-text-muted text-left cursor-pointer hover:border-border-strong transition-colors"
+                      >
+                        <PhosphorIcon name="search" size={16} />
+                        Search coins, cities, currencies…
+                      </button>
 
-          {/* Preferences Row for Mobile (Includes Theme Switcher) */}
-          <div className="flex items-center justify-between border-t border-border-hairline/60 pt-4 mt-2">
-            <span className="text-xs font-sans font-semibold text-text-secondary">Switch Theme</span>
-            <div className="flex items-center justify-center transition-all duration-200 active:scale-95">
-              <ThemeToggle />
-            </div>
+                      {[
+                        { title: 'Overview', items: [{ id: 'dashboard', label: 'Dashboard', icon: 'grid-alt' }, { id: 'updates', label: 'Updates', icon: 'bell' }, { id: 'reports', label: 'Reports', icon: 'file' }] },
+                        { title: 'Explore', items: EXPLORE_ITEMS },
+                        { title: 'Account', items: [{ id: 'settings', label: 'Settings', icon: 'cog' }, { id: 'privacy', label: 'Privacy', icon: 'info' }] },
+                      ].map(section => (
+                        <div key={section.title}>
+                          <p className="eyebrow px-3 mb-1.5">{section.title}</p>
+                          <div className="flex flex-col gap-0.5">
+                            {section.items.map(item => {
+                              const isActive = activeTab === item.id;
+                              return (
+                                <a
+                                  key={item.id}
+                                  {...linkTo(item.id)}
+                                  className="list-row"
+                                  aria-selected={isActive}
+                                  aria-current={isActive ? 'page' : undefined}
+                                >
+                                  <PhosphorIcon name={item.icon} size={18} className={isActive ? 'text-text-primary' : 'text-text-muted'} />
+                                  <span className={`text-[15px] ${isActive ? 'font-semibold text-text-primary' : 'font-medium text-text-secondary'}`}>{item.label}</span>
+                                  {item.id === 'updates' && needsAttentionCount > 0 && (
+                                    <StatusBadge tone="warning" progress={null} size="xs" className="ml-auto tabular-nums">{needsAttentionCount}</StatusBadge>
+                                  )}
+                                </a>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="px-4 py-3 border-t border-border-hairline flex items-center justify-between shrink-0">
+                      <span className="text-sm font-medium text-text-secondary">Appearance</span>
+                      <ThemeToggle />
+                    </div>
+                  </motion.aside>
+                </div>
+              )}
+            </AnimatePresence>
+          </>
+        );
+      })()}
+
+      {/* Offline / failed-fetch banner */}
+      {(isOffline || fetchFailed) && data && (
+        <div className="w-full border-b border-border-hairline bg-surface-2/80" role="status" aria-live="polite" id="offline-banner">
+          <div className="max-w-7xl xl:max-w-[1840px] mx-auto px-4 md:px-6 xl:px-10 min-h-10 py-2 flex items-center justify-between gap-3 text-[13px]">
+            <span className="flex items-center gap-2 text-text-secondary min-w-0">
+              <span className="w-1.5 h-1.5 rounded-full bg-status-warning shrink-0" aria-hidden="true" />
+              <span className="truncate">{isOffline ? 'Offline — showing last saved data' : 'Can’t reach Climex right now — showing last saved data'}</span>
+            </span>
+            {!isOffline && (
+              <button onClick={() => fetchDashboardData(true)} disabled={refreshing} className="btn btn-ghost btn-sm -mr-2 shrink-0">
+                {refreshing ? 'Retrying…' : 'Retry'}
+              </button>
+            )}
           </div>
         </div>
       )}
 
       {/* Loading Skeleton & Error Tickers */}
-      {loading && !data && (
-        <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 flex flex-col justify-center items-center min-h-[60vh]">
-          <div className="w-12 h-12 rounded-full border-2 border-border-hairline border-t-status-accent animate-spin mb-4" />
-          <p className="font-sans font-medium text-sm text-text-secondary">Loading...</p>
-        </main>
-      )}
-
       {error && !data && (
-        <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 flex flex-col justify-center items-center min-h-[60vh]" id="error-screen">
+        <main className="flex-1 max-w-7xl xl:max-w-[1840px] w-full mx-auto p-4 md:p-6 xl:px-10 xl:py-5 flex flex-col justify-center items-center min-h-[60vh]" id="error-screen">
           <div className="w-12 h-12 rounded-full bg-status-danger-bg text-status-danger flex items-center justify-center mb-4">
             <PhosphorIcon name="error-circle" className="text-2xl" />
           </div>
@@ -1718,72 +2070,87 @@ export default function App() {
           </p>
           <button
             onClick={() => fetchDashboardData()}
-            className="px-6 py-2.5 bg-text-primary text-surface-1 font-sans font-medium text-xs rounded-full shadow-sm hover:scale-[1.02] transition-transform cursor-pointer"
+            className="btn btn-primary"
           >
             Retry Connection
           </button>
         </main>
       )}
 
-      {/* Main Content Pane */}
-      {data && (
-        <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 z-10 relative flex flex-col gap-4 md:gap-6">
+      {/* Main Content Pane (header stays mounted from the first paint; body is a skeleton until data arrives) */}
+      {(data || (loading && !error)) && (
+        <main className="flex-1 max-w-7xl xl:max-w-[1840px] w-full mx-auto p-4 md:p-6 xl:px-10 xl:py-5 z-10 relative flex flex-col gap-4 md:gap-6 xl:gap-5">
 
           {/* Header Greeting Stripe */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5 md:gap-4 border-b border-border-hairline pb-3 md:pb-4" id="dashboard-welcome-stripe">
-            <div>
-              <h1 className="font-sans font-light text-xl md:text-3xl tracking-tight text-text-primary leading-none">
-                {userName ? (
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5 md:gap-4 md:border-b md:border-border-hairline md:pb-4 xl:pb-3" id="dashboard-welcome-stripe">
+            <div className="min-w-0">
+              {/* Breadcrumbs (hidden on the dashboard itself) */}
+              {activeTab !== 'dashboard' && (
+                <nav aria-label="Breadcrumb" className="hidden md:flex items-center gap-1 mb-2 text-[13px] font-sans text-text-muted select-none">
+                  <a
+                    href={pathForTab('dashboard')}
+                    onClick={(e) => {
+                      if (isModifiedClick(e)) return;
+                      e.preventDefault();
+                      setActiveTab('dashboard');
+                      setGlobalSearchQuery('');
+                      setShowSearchResults(false);
+                    }}
+                    className="hover:text-text-primary hover:underline underline-offset-2 transition-colors cursor-pointer outline-none focus-visible:underline"
+                  >
+                    Dashboard
+                  </a>
+                  <PhosphorIcon name="caret-right" size={12} className="text-text-muted" />
+                  {['crypto', 'currency', 'weather', 'aqi', 'countries'].includes(activeTab) && (
+                    <>
+                      <span>Explore</span>
+                      <PhosphorIcon name="caret-right" size={12} className="text-text-muted" />
+                    </>
+                  )}
+                  <span className="text-text-secondary font-medium" aria-current="page">{PAGE_META[activeTab]?.title ?? activeTab}</span>
+                </nav>
+              )}
+
+              <h1 className="font-display font-normal text-2xl md:text-[32px] tracking-tight text-text-primary leading-tight">
+                {activeTab === 'dashboard' ? (
                   <>
-                    {getGreeting()}, <span className="font-medium">{userName}</span>
+                    {getGreeting()}, <span className="font-medium">{userName || 'trader'}</span>
                   </>
                 ) : (
-                  <>
-                    {getGreeting()}, <span className="font-medium">trader</span>
-                  </>
+                  PAGE_META[activeTab]?.title ?? activeTab
                 )}
               </h1>
-
-              {/* Dynamic Breadcrumbs Trail */}
-              <div className="flex items-center gap-1.5 mt-2.5 text-[10px] md:text-xs font-sans text-text-secondary select-none">
-                <button
-                  onClick={() => {
-                    setActiveTab('dashboard');
-                    setGlobalSearchQuery('');
-                    setShowSearchResults(false);
-                  }}
-                  className="hover:text-text-primary transition-colors cursor-pointer outline-none focus-visible:underline"
-                >
-                  Dashboard
-                </button>
-                {activeTab !== 'dashboard' && (
-                  <>
-                    <PhosphorIcon name="caret-right" className="text-[10px] text-text-muted" />
-                    {['crypto', 'currency', 'weather', 'aqi', 'countries'].includes(activeTab) ? (
-                      <>
-                        <span className="text-text-muted">Explore</span>
-                        <PhosphorIcon name="caret-right" className="text-[10px] text-text-muted" />
-                        <span className="text-text-primary font-medium capitalize">
-                          {activeTab === 'aqi' ? 'Air Quality' : activeTab}
-                        </span>
-                      </>
-                    ) : (
-                      <span className="text-text-primary font-medium capitalize">{activeTab}</span>
-                    )}
-                  </>
-                )}
-              </div>
+              <p className="mt-1 text-sm text-text-secondary max-w-2xl">
+                {activeTab === 'dashboard'
+                  ? 'Here’s what’s moving across markets, weather and air quality right now.'
+                  : PAGE_META[activeTab]?.description}
+              </p>
+              {PAGE_SECTION[activeTab] && (
+                <Freshness
+                  fetchedAt={sectionMeta[PAGE_SECTION[activeTab]!]?.fetchedAt}
+                  maxAgeMs={SECTIONS[PAGE_SECTION[activeTab]!].maxAgeMs}
+                  now={currentTime.getTime()}
+                  prefix="Data updated"
+                  className="mt-1.5 text-[12.5px]"
+                />
+              )}
             </div>
             {/* Last Synced Clock */}
-            <SyncStatusWidget lastSynced={lastSyncedTime} currentTime={currentTime} />
+            <div className="hidden md:block">
+              <SyncStatusWidget lastSynced={lastSyncedTime} currentTime={currentTime} />
+            </div>
           </div>
 
+          {!data ? (
+            <PageSkeleton tab={activeTab} />
+          ) : (
+          <>
           {/* ==================== TAB 1: DASHBOARD HOME ==================== */}
           {activeTab === 'dashboard' && (
-            <div className="flex flex-col gap-4 md:gap-6 animate-fade-in" id="dashboard-tab-view">
+            <div className="flex flex-col gap-4 md:gap-6 xl:gap-5 animate-fade-in" id="dashboard-tab-view">
 
               {/* KPI Strip */}
-              <section className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4" id="kpi-strip">
+              <section className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4 xl:gap-5" id="kpi-strip">
                 {[
                   {
                     title: 'Bitcoin Price',
@@ -1833,6 +2200,24 @@ export default function App() {
                   // Determine icon based on index or key
                   const icons = ['crypto', 'weather', 'currency', 'aqi'];
                   const iconName = icons[idx];
+                  // Mobile: one short status line under the value; age only shown once data is stale
+                  const kpiMeta = sectionMeta[kpi.tab as SectionKey];
+                  const kpiStale = !!kpiMeta && currentTime.getTime() - kpiMeta.fetchedAt > SECTIONS[kpi.tab as SectionKey].maxAgeMs;
+                  const mobileLabel = ({ crypto: 'Bitcoin', weather: 'Weather', currency: 'USD → EUR', aqi: 'Air quality' } as Record<string, string>)[kpi.tab];
+                  const aqiLevel = activeAQI?.status === 'Unhealthy for Sensitive Groups' ? 'Sensitive groups' : activeAQI?.status;
+                  const mobileStatus =
+                    kpi.change !== null && kpi.change !== undefined ? (
+                      <span className={`font-medium tabular-nums ${kpi.change >= 0 ? 'text-status-success' : 'text-status-danger'}`}>
+                        {kpi.change >= 0 ? '▲' : '▼'} {Math.abs(kpi.change).toFixed(1)}%<span className="font-normal text-text-muted"> 24h</span>
+                      </span>
+                    ) : kpi.tab === 'weather' ? (
+                      <span className="truncate"><span className="capitalize">{activeWeather?.condition?.toLowerCase()}</span><span className="text-text-muted"> · {selectedCity}</span></span>
+                    ) : (
+                      <span className="truncate">
+                        <span className={`font-medium ${aqiTone(activeAQI?.status).tone === 'success' ? 'text-status-success' : aqiTone(activeAQI?.status).tone === 'critical' ? 'text-status-danger' : 'text-status-warning'}`}>{aqiLevel}</span>
+                        <span className="text-text-muted"> · {selectedCity}</span>
+                      </span>
+                    );
                   return (
                     <div
                       key={idx}
@@ -1841,31 +2226,58 @@ export default function App() {
                           setActiveTab(kpi.tab);
                         }
                       }}
-                      className="bg-surface-2 p-3.5 md:p-5 rounded-2xl flex flex-col justify-between min-h-[95px] md:min-h-[110px] transition-all duration-200 hover:bg-surface-3/50 hover:border-border-hairline active:scale-[0.98] cursor-pointer border border-transparent"
+                      className="bg-surface-1 px-3.5 py-3 md:p-5 xl:px-5 xl:py-4 rounded-2xl flex flex-col justify-between md:min-h-[110px] xl:min-h-0 transition-all duration-200 hover:border-border-strong active:scale-[0.98] cursor-pointer border border-border-hairline shadow-xs"
                     >
+                      {/* Mobile */}
+                      <div className="md:hidden flex flex-col min-w-0">
+                        <div className="flex items-center gap-1.5 min-w-0 text-text-secondary">
+                          <PhosphorIcon name={iconName} size={14} className="shrink-0" />
+                          <span className="text-[12.5px] font-medium truncate">{mobileLabel}</span>
+                        </div>
+                        <p className="mt-2 text-[20px] font-semibold tracking-[-0.02em] text-text-primary tabular-nums leading-none truncate">{kpi.value}</p>
+                        <p className="mt-1.5 flex items-center gap-1 min-w-0 text-[12px] leading-tight text-text-secondary">
+                          {mobileStatus}
+                        </p>
+                        {kpiStale && (
+                          <Freshness fetchedAt={kpiMeta?.fetchedAt} maxAgeMs={SECTIONS[kpi.tab as SectionKey].maxAgeMs} now={currentTime.getTime()} prefix="" className="mt-1 text-[11px]" />
+                        )}
+                      </div>
+
+                      {/* Tablet & desktop */}
+                      <div className="hidden md:contents">
                       <div className="flex items-start justify-between gap-1.5 w-full">
                         <div className="flex items-center gap-1.5 overflow-hidden min-w-0">
                           <span className={`p-1 rounded-lg bg-surface-3 text-text-secondary ${kpi.textColor || ''} shrink-0`}>
                             <PhosphorIcon name={iconName} className="text-xs md:text-sm" />
                           </span>
-                          <span className="text-[10px] md:text-[11px] font-sans font-semibold text-text-secondary leading-none truncate">
+                          <span className="text-[11.5px] md:text-[12.5px] font-sans font-semibold text-text-secondary leading-none truncate">
                             <span className="hidden md:inline">{kpi.title}</span>
                             <span className="inline md:hidden">{kpi.titleMobile}</span>
                           </span>
                         </div>
-                        {kpi.change !== null && (
-                          <span className={`text-[9px] md:text-[10px] font-sans font-semibold flex items-center gap-0.5 px-1.5 py-0.5 rounded-full shrink-0 ${kpi.change >= 0 ? 'bg-status-success-bg text-status-success' : 'bg-status-danger-bg text-status-danger'
-                            }`}>
+                        {kpi.change !== null && kpi.change !== undefined ? (
+                          <StatusBadge tone={kpi.change >= 0 ? 'success' : 'critical'} progress={null} size="xs" className="tabular-nums">
+                            <PhosphorIcon name={kpi.change >= 0 ? 'trending-up' : 'trending-down'} size={11} />
                             {kpi.change >= 0 ? '+' : ''}{kpi.change.toFixed(1)}%
+                          </StatusBadge>
+                        ) : kpi.tab === 'aqi' && activeAQI ? (
+                          <span className="hidden md:inline-flex">
+                            <StatusBadge {...aqiTone(activeAQI.status)} size="xs">
+                              {activeAQI.status === 'Unhealthy for Sensitive Groups' ? 'Sensitive' : activeAQI.status}
+                            </StatusBadge>
                           </span>
-                        )}
+                        ) : kpi.tab === 'weather' && activeWeather?.condition ? (
+                          <StatusBadge tone="info" progress={null} size="xs" className="capitalize">
+                            {activeWeather.condition}
+                          </StatusBadge>
+                        ) : null}
                       </div>
-                      <div className="mt-2 md:mt-4">
-                        <p className="font-sans font-semibold md:font-light text-base md:text-2xl tracking-tight text-text-primary tabular-nums leading-none">
+                      <div className="mt-2 md:mt-4 xl:mt-3">
+                        <p className="font-sans font-semibold text-base md:text-[26px] tracking-[-0.02em] text-text-primary tabular-nums leading-none">
                           {kpi.value}
                         </p>
                         <div className="flex items-center gap-1.5 mt-1 md:mt-1.5 flex-wrap min-w-0">
-                          <span className="text-[9px] md:text-[10px] font-sans text-text-muted font-medium truncate">
+                          <span className="text-[10.5px] md:text-[11.5px] font-sans text-text-muted font-medium truncate">
                             <span className="hidden md:inline">{kpi.unit}</span>
                             {kpi.unitMobile !== '' && (
                               <span className="inline md:hidden">{kpi.unitMobile || kpi.unit}</span>
@@ -1875,21 +2287,21 @@ export default function App() {
                             <>
                               {locationSource === 'default' ? (
                                 <span
-                                  className="text-[8px] bg-surface-3 text-text-muted px-1.5 py-0.2 rounded border border-border-hairline/35 font-sans font-medium cursor-help"
+                                  className="text-[10px] bg-surface-2 text-text-secondary px-1.5 py-0.2 rounded border border-border-hairline/35 font-sans font-medium cursor-help"
                                   title={`Showing ${selectedCity} — tap to change`}
                                 >
                                   default
                                 </span>
                               ) : locationSource === 'gps' ? (
                                 <span
-                                  className="text-[8px] bg-status-success-bg text-status-success px-1.5 py-0.2 rounded font-sans font-medium"
+                                  className="text-[10px] bg-status-success-bg text-status-success px-1.5 py-0.2 rounded font-sans font-medium"
                                   title="Detected via your browser geolocation"
                                 >
                                   GPS
                                 </span>
                               ) : (
                                 <span
-                                  className="text-[8px] bg-status-info-bg text-status-info px-1.5 py-0.2 rounded font-sans font-medium"
+                                  className="text-[10px] bg-status-info-bg text-status-info px-1.5 py-0.2 rounded font-sans font-medium"
                                   title="Saved in your profile preferences"
                                 >
                                   profile
@@ -1897,228 +2309,194 @@ export default function App() {
                               )}
                             </>
                           )}
+                          <Freshness
+                            fetchedAt={sectionMeta[kpi.tab as SectionKey]?.fetchedAt}
+                            maxAgeMs={SECTIONS[kpi.tab as SectionKey].maxAgeMs}
+                            now={currentTime.getTime()}
+                            prefix=""
+                            className="ml-auto text-[11px]"
+                          />
                         </div>
+                      </div>
                       </div>
                     </div>
                   );
                 })}
               </section>
 
-              <div className="flex flex-col lg:grid lg:grid-cols-12 gap-4 md:gap-6">
+              <div className="lg:hidden segmented segmented-full" role="group" aria-label="Dashboard sections">
+                {([
+                  ['watchlist', 'Watchlist'],
+                  ['alerts', `Alerts${alerts.length ? ` (${alerts.length})` : ''}`],
+                  ['air', 'Air quality'],
+                ] as const).map(([id, label]) => (
+                  <button key={id} aria-pressed={dashMobileSection === id} onClick={() => setDashMobileSection(id)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex flex-col lg:grid lg:grid-cols-12 gap-4 md:gap-6 xl:gap-5">
 
                 {/* Left Column (Timeline/Recent Updates) — Span 3 - order-3 on mobile */}
-                <div className="lg:col-span-3 flex flex-col justify-between order-3 lg:order-none" id="dashboard-alerts-insights-panel">
-                  <div className="p-1 bg-transparent flex flex-col justify-between h-full min-h-[420px]">
-                    <div>
-                      <div className="flex items-center justify-between mb-5">
-                        <h3 className="font-sans font-medium text-sm text-text-primary">Alerts & insights</h3>
-                        {wsStatus === 'connected' ? (
-                          <div className="flex items-center gap-1.5 text-text-muted shrink-0 select-none">
-                            <span className="text-[10px] font-sans font-normal uppercase tracking-wider">Live feed</span>
-                          </div>
-                        ) : wsStatus === 'reconnecting' || wsStatus === 'connecting' ? (
-                          <div className="flex items-center gap-1.5 text-text-muted shrink-0 select-none">                            
-                            <span className="text-[10px] font-sans font-normal uppercase tracking-wider">Reconnecting...</span>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-1.5 text-text-muted shrink-0 select-none">
-                            <span className="text-[10px] font-sans font-normal uppercase tracking-wider">Offline</span>
-                          </div>
-                        )}
+                <div className={`lg:col-span-3 flex-col order-3 lg:order-none lg:flex ${dashMobileSection === 'alerts' ? 'flex' : 'hidden'}`} id="dashboard-alerts-insights-panel">
+                  {(() => {
+                    const ALERTS_DESKTOP_LIMIT = 5;
+                    const ALERTS_MOBILE_LIMIT = 3;
+                    const visibleAlerts = isAlertsExpanded ? alerts : alerts.slice(0, ALERTS_DESKTOP_LIMIT);
+                    const needsAttentionAll = alerts.filter(item => item.severity === 'needs-attention');
+                    const fyiAll = alerts.filter(item => item.severity === 'fyi');
+                    const needsAttentionGroup = visibleAlerts.filter(item => item.severity === 'needs-attention');
+                    const fyiGroup = visibleAlerts.filter(item => item.severity === 'fyi');
+                    // On mobile (collapsed) only the first few rows in display order are shown
+                    const alertsMobileHidden = (displayIndex: number) =>
+                      !isAlertsExpanded && displayIndex >= ALERTS_MOBILE_LIMIT;
+                    const fyiMobileAllHidden = !isAlertsExpanded && fyiGroup.length > 0 && needsAttentionGroup.length >= ALERTS_MOBILE_LIMIT;
+                    const toggleAlert = (id: string) => setExpandedAlerts(prev => ({ ...prev, [id]: !prev[id] }));
+
+                    const groupHeader = (label: string, count: number, tone: 'warning' | 'info') => (
+                      <div className="flex items-center justify-between gap-2 mb-1">
+                        <h4 className="text-[13px] font-semibold text-text-secondary">{label}</h4>
+                        <StatusBadge tone={count > 0 ? tone : 'neutral'} progress={null} size="xs" className="tabular-nums">{count}</StatusBadge>
                       </div>
+                    );
 
-                      {(() => {
-                        const visibleAlerts = isAlertsExpanded ? alerts : alerts.slice(0, 5);
-                        const needsAttentionGroup = visibleAlerts.filter(item => item.severity === 'needs-attention');
-                        const fyiGroup = visibleAlerts.filter(item => item.severity === 'fyi');
+                    return (
+                      <section className="card flex flex-col lg:h-full" aria-labelledby="alerts-panel-title">
+                        {/* Header */}
+                        <div className="flex items-start justify-between gap-3 px-4 md:px-5 pt-4 md:pt-5">
+                          <div className="min-w-0">
+                            <h3 id="alerts-panel-title" className="card-title">Alerts & insights</h3>
+                            <p className="card-subtitle">
+                              {alerts.length === 0
+                                ? 'Signals from markets, weather and air quality'
+                                : `${needsAttentionAll.length} need${needsAttentionAll.length === 1 ? 's' : ''} attention · ${fyiAll.length} update${fyiAll.length === 1 ? '' : 's'}`}
+                            </p>
+                          </div>
+                          {wsStatus === 'connected' ? (
+                            <StatusBadge tone="success" progress="complete">Live</StatusBadge>
+                          ) : wsStatus === 'reconnecting' || wsStatus === 'connecting' ? (
+                            <StatusBadge tone="attention" progress="partial">Reconnecting</StatusBadge>
+                          ) : (
+                            <StatusBadge tone="critical" progress="incomplete">Offline</StatusBadge>
+                          )}
+                        </div>
 
-                        return (
-                          <div className="flex flex-col gap-4 w-full">
-                            {/* Fixed height scrollable container matching Watchlist panel height (~420px max) */}
-                            <div className="max-h-[420px] overflow-y-auto pr-1 flex flex-col gap-6 scrollbar-thin scrollbar-thumb-border-hairline" id="alerts-scrollable-container">
+                        {/* Body */}
+                        <div className="flex-1 min-h-0 px-4 md:px-5 pt-3 pb-2">
+                          {alerts.length === 0 ? (
+                            <div className="flex items-start gap-3 py-4" id="alerts-empty-state">
+                              <span className="w-8 h-8 rounded-lg bg-status-success-bg text-status-success flex items-center justify-center shrink-0">
+                                <PhosphorIcon name="check-circle" size={16} />
+                              </span>
+                              <div>
+                                <p className="text-[14px] font-medium text-text-primary">All quiet</p>
+                                <p className="text-[13px] text-text-secondary leading-relaxed mt-0.5">Nothing needs your attention. Price spikes, weather and air-quality changes will show up here.</p>
+                              </div>
+                            </div>
+                          ) : (
+                            <div
+                              className={`flex flex-col gap-4 ${isAlertsExpanded ? 'max-h-[70vh] lg:max-h-[440px] overflow-y-auto pr-1 -mr-1' : ''}`}
+                              id="alerts-scrollable-container"
+                            >
                               {/* Needs attention group */}
                               <div id="alerts-needs-attention-group" className="flex flex-col">
-                                <h4 className="text-[11px] font-medium tracking-wide text-text-muted uppercase mb-2 font-sans">Needs attention</h4>
-
+                                {groupHeader('Needs attention', needsAttentionAll.length, 'warning')}
                                 {needsAttentionGroup.length === 0 ? (
-                                  <p className="text-xs text-text-muted py-3 italic font-sans">No active priority alerts.</p>
+                                  <p className="flex items-center gap-2 py-2 text-[13px] text-text-secondary">
+                                    <PhosphorIcon name="check-circle" size={16} className="text-status-success shrink-0" />
+                                    Nothing needs your attention right now.
+                                  </p>
                                 ) : (
-                                  needsAttentionGroup.map((item, idx, arr) => {
-                                    const isExpanded = !!expandedAlerts[item.id];
-                                    const isNew = newlyArrivedIds.has(item.id);
-                                    return (
-                                      <div
-                                        key={item.id}
-                                        onClick={() => setExpandedAlerts(prev => ({ ...prev, [item.id]: !prev[item.id] }))}
-                                        className={`flex gap-3 py-3 ${idx < arr.length - 1 ? 'border-b border-border-hairline/50' : ''} cursor-pointer select-none group transition-all duration-1000 ${isNew ? 'bg-status-warning/15 -mx-3 px-3 rounded-xl' : 'bg-transparent'
-                                          }`}
-                                        id={`alert-item-${item.id}`}
-                                      >
-                                        <div className="flex-shrink-0 mt-0.5 text-white opacity-95">
-                                          <PhosphorIcon name={item.icon} className="text-white" size={16} />
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                          <div className="flex items-start justify-between gap-2 min-w-0 w-full">
-                                            <span className="text-[14px] font-medium text-text-primary leading-snug truncate flex-1 pr-1 font-sans">
-                                              {item.headline}
-                                            </span>
-                                            <div className="flex items-center gap-1 shrink-0 text-text-muted mt-0.5">
-                                              <span className="text-[12px] font-normal font-sans">{getRelativeTime(item.createdAt)}</span>
-                                              <span className={`inline-block transition-transform duration-150 ${isExpanded ? 'rotate-180' : ''}`}>
-                                                <PhosphorIcon name="chevron-down" size={14} className="text-text-muted" />
-                                              </span>
-                                            </div>
-                                          </div>
-                                          <p className={`text-[13px] text-text-secondary leading-relaxed font-normal mt-1 transition-[max-height] duration-300 ease-in-out overflow-hidden font-sans ${isExpanded ? 'max-h-[200px] line-clamp-none' : 'max-h-[20px] line-clamp-1'
-                                            }`}>
-                                            {item.detail}
-                                          </p>
-
-                                          {isExpanded && item.sourceEvent && (
-                                            <div className="mt-2.5 p-2.5 bg-surface-3/40 rounded-xl border border-border-hairline/30 flex flex-col gap-1 text-[11px] font-sans text-text-secondary select-text animate-fade-in">
-                                              <div className="flex justify-between items-center text-[10px] text-text-muted uppercase tracking-wider border-b border-border-hairline/30 pb-1 mb-1 font-sans">
-                                                <span>Audit Data Trace</span>
-                                                <span className="text-[9px] font-sans font-normal text-status-warning bg-status-warning/10 px-1 py-0.2 rounded">Event Bound</span>
-                                              </div>
-                                              <div className="flex justify-between font-sans">
-                                                <span className="text-text-muted">Metric Source:</span>
-                                                <span className="text-text-primary font-medium">{item.sourceEvent.metric}</span>
-                                              </div>
-                                              <div className="flex justify-between font-sans">
-                                                <span className="text-text-muted">Trigger Value:</span>
-                                                <span className="text-text-primary font-semibold">{item.sourceEvent.value}</span>
-                                              </div>
-                                              <div className="flex justify-between font-sans">
-                                                <span className="text-text-muted">Target Entity:</span>
-                                                <span className="text-text-primary font-medium">{item.sourceEvent.targetEntity}</span>
-                                              </div>
-                                              {item.sourceEvent.extraInfo && Object.keys(item.sourceEvent.extraInfo).length > 0 && (
-                                                <div className="mt-1.5 pt-1.5 border-t border-border-hairline/30 text-[10px] text-text-muted flex flex-wrap gap-x-3 gap-y-1 font-sans">
-                                                  {Object.entries(item.sourceEvent.extraInfo).map(([k, v]) => (
-                                                    <span key={k}>{k}: <span className="text-text-secondary font-sans">{String(v)}</span></span>
-                                                  ))}
-                                                </div>
-                                              )}
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-                                    );
-                                  })
+                                  <div className="flex flex-col divide-y divide-border-hairline">
+                                    {needsAttentionGroup.map((item, idx) => (
+                                      <React.Fragment key={item.id}>
+                                        <AlertsItem
+                                          item={item}
+                                          tone="warning"
+                                          icon={<PhosphorIcon name={item.icon} size={16} />}
+                                          relativeTime={getRelativeTime(item.createdAt)}
+                                          isExpanded={!!expandedAlerts[item.id]}
+                                          isNew={newlyArrivedIds.has(item.id)}
+                                          onToggle={() => toggleAlert(item.id)}
+                                          mobileHidden={alertsMobileHidden(idx)}
+                                        />
+                                      </React.Fragment>
+                                    ))}
+                                  </div>
                                 )}
                               </div>
 
                               {/* For your information group */}
-                              <div id="alerts-fyi-group" className="flex flex-col">
-                                <h4 className="text-[11px] font-medium tracking-wide text-text-muted uppercase mb-2 font-sans">For your information</h4>
-
+                              <div id="alerts-fyi-group" className={`flex-col ${fyiMobileAllHidden ? 'hidden md:flex' : 'flex'}`}>
+                                {groupHeader('For your information', fyiAll.length, 'info')}
                                 {fyiGroup.length === 0 ? (
-                                  <p className="text-xs text-text-muted py-3 italic font-sans">No active information alerts.</p>
+                                  <p className="flex items-center gap-2 py-2 text-[13px] text-text-secondary">
+                                    <PhosphorIcon name="info" size={16} className="text-text-muted shrink-0" />
+                                    No new updates right now.
+                                  </p>
                                 ) : (
-                                  fyiGroup.map((item, idx, arr) => {
-                                    const isExpanded = !!expandedAlerts[item.id];
-                                    const isNew = newlyArrivedIds.has(item.id);
-                                    return (
-                                      <div
-                                        key={item.id}
-                                        onClick={() => setExpandedAlerts(prev => ({ ...prev, [item.id]: !prev[item.id] }))}
-                                        className={`flex gap-3 py-3 ${idx < arr.length - 1 ? 'border-b border-border-hairline/50' : ''} cursor-pointer select-none group transition-all duration-1000 ${isNew ? 'bg-status-warning/15 -mx-3 px-3 rounded-xl' : 'bg-transparent'
-                                          }`}
-                                        id={`alert-item-${item.id}`}
-                                      >
-                                        <div className="flex-shrink-0 mt-0.5 text-white opacity-95">
-                                          <PhosphorIcon name={item.icon} className="text-white" size={16} />
-                                        </div>
-                                        <div className="flex-1 min-w-0">
-                                          <div className="flex items-start justify-between gap-2 min-w-0 w-full">
-                                            <span className="text-[14px] font-medium text-text-primary leading-snug truncate flex-1 pr-1 font-sans">
-                                              {item.headline}
-                                            </span>
-                                            <div className="flex items-center gap-1 shrink-0 text-text-muted mt-0.5">
-                                              <span className="text-[12px] font-normal font-sans">{getRelativeTime(item.createdAt)}</span>
-                                              <span className={`inline-block transition-transform duration-150 ${isExpanded ? 'rotate-180' : ''}`}>
-                                                <PhosphorIcon name="chevron-down" size={14} className="text-text-muted" />
-                                              </span>
-                                            </div>
-                                          </div>
-                                          <p className={`text-[13px] text-text-secondary leading-relaxed font-normal mt-1 transition-[max-height] duration-300 ease-in-out overflow-hidden font-sans ${isExpanded ? 'max-h-[200px] line-clamp-none' : 'max-h-[20px] line-clamp-1'
-                                            }`}>
-                                            {item.detail}
-                                          </p>
-
-                                          {isExpanded && item.sourceEvent && (
-                                            <div className="mt-2.5 p-2.5 bg-surface-3/40 rounded-xl border border-border-hairline/30 flex flex-col gap-1 text-[11px] font-sans text-text-secondary select-text animate-fade-in">
-                                              <div className="flex justify-between items-center text-[10px] text-text-muted uppercase tracking-wider border-b border-border-hairline/30 pb-1 mb-1 font-sans">
-                                                <span>Audit Data Trace</span>
-                                                <span className="text-[9px] font-sans font-normal text-status-warning bg-status-warning/10 px-1 py-0.2 rounded">Event Bound</span>
-                                              </div>
-                                              <div className="flex justify-between font-sans">
-                                                <span className="text-text-muted">Metric Source:</span>
-                                                <span className="text-text-primary font-medium">{item.sourceEvent.metric}</span>
-                                              </div>
-                                              <div className="flex justify-between font-sans">
-                                                <span className="text-text-muted">Trigger Value:</span>
-                                                <span className="text-text-primary font-semibold">{item.sourceEvent.value}</span>
-                                              </div>
-                                              <div className="flex justify-between font-sans">
-                                                <span className="text-text-muted">Target Entity:</span>
-                                                <span className="text-text-primary font-medium">{item.sourceEvent.targetEntity}</span>
-                                              </div>
-                                              {item.sourceEvent.extraInfo && Object.keys(item.sourceEvent.extraInfo).length > 0 && (
-                                                <div className="mt-1.5 pt-1.5 border-t border-border-hairline/30 text-[10px] text-text-muted flex flex-wrap gap-x-3 gap-y-1 font-sans">
-                                                  {Object.entries(item.sourceEvent.extraInfo).map(([k, v]) => (
-                                                    <span key={k}>{k}: <span className="text-text-secondary font-sans">{String(v)}</span></span>
-                                                  ))}
-                                                </div>
-                                              )}
-                                            </div>
-                                          )}
-                                        </div>
-                                      </div>
-                                    );
-                                  })
+                                  <div className="flex flex-col divide-y divide-border-hairline">
+                                    {fyiGroup.map((item, idx) => (
+                                      <React.Fragment key={item.id}>
+                                        <AlertsItem
+                                          item={item}
+                                          tone="info"
+                                          icon={<PhosphorIcon name={item.icon} size={16} />}
+                                          relativeTime={getRelativeTime(item.createdAt)}
+                                          isExpanded={!!expandedAlerts[item.id]}
+                                          isNew={newlyArrivedIds.has(item.id)}
+                                          onToggle={() => toggleAlert(item.id)}
+                                          mobileHidden={alertsMobileHidden(needsAttentionGroup.length + idx)}
+                                        />
+                                      </React.Fragment>
+                                    ))}
+                                  </div>
                                 )}
                               </div>
                             </div>
+                          )}
 
-                            {/* View All / Collapse Button */}
-                            {alerts.length > 5 && (
-                              <button
-                                onClick={() => setIsAlertsExpanded(!isAlertsExpanded)}
-                                className="w-full mt-1 py-2 px-3 bg-surface-2 hover:bg-surface-3 border border-border-hairline rounded-xl text-xs font-sans font-medium text-text-primary transition-all duration-150 cursor-pointer flex items-center justify-center gap-1.5 hover:border-border-strong select-none"
-                                id="view-all-alerts-btn"
-                              >
-                                <PhosphorIcon name={isAlertsExpanded ? "caret-up" : "menu"} size={12} className="text-text-secondary" />
-                                {isAlertsExpanded ? "Show less" : `View all alerts history (${alerts.length})`}
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })()}
+                          {/* View all / collapse (3 on mobile, 5 on desktop) */}
+                          {alerts.length > ALERTS_MOBILE_LIMIT && (
+                            <a
+                              href={pathForTab('updates')}
+                              onClick={(e) => {
+                                if (isModifiedClick(e)) return;
+                                e.preventDefault();
+                                setActiveTab('updates');
+                              }}
+                              className={`btn btn-secondary w-full mt-3 h-11 md:h-9 ${alerts.length > ALERTS_DESKTOP_LIMIT ? '' : 'md:hidden'}`}
+                              id="view-all-alerts-btn"
+                            >
+                              View all {alerts.length} in Updates
+                              <PhosphorIcon name="caret-right" size={14} />
+                            </a>
+                          )}
+                        </div>
 
-
-                    </div>
-
-                    {/* Minimal System Status Footer */}
-                    <div className="mt-6 pt-4 border-t border-border-hairline/50 flex items-center justify-between text-[11px] text-text-muted font-normal" id="system-status-footer">
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-status-success shrink-0" />
-                        <span>services available</span>
-                      </div>
-                      <span>Synced 09:30 UTC</span>
-                    </div>
-                  </div>
+                        {/* Footer: service status */}
+                        <div className="mt-auto px-4 md:px-5 py-3 border-t border-border-hairline flex items-center justify-between gap-3 text-[12.5px] text-text-muted" id="system-status-footer">
+                          <StatusBadge tone="success" progress="complete">All services operational</StatusBadge>
+                          <span className="tabular-nums">{lastSyncedTime ? `Updated ${lastSyncedTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Updating…'}</span>
+                        </div>
+                      </section>
+                    );
+                  })()}
                 </div>
 
                 {/* Center Area (Search + Watchlist Table + Price Trend Chart) — Span 6 - order-1 on mobile */}
-                <div className="lg:col-span-6 flex flex-col gap-6 order-1 lg:order-none">
+                <div className={`lg:col-span-6 flex-col gap-4 md:gap-6 order-1 lg:order-none lg:flex ${dashMobileSection === 'watchlist' ? 'flex' : 'hidden'}`}>
 
                   {/* Watchlist table card (List panel - no border, hairline row dividers) */}
                   <div className="p-1">
                     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-5">
                       <div>
                         <h3 className="font-sans font-semibold text-sm text-text-primary tracking-tight">Market Watchlist</h3>
-                        <p className="text-xs text-text-secondary">Track real-time digital asset indices</p>
+                        <p className="text-xs text-text-secondary">
+                          Track real-time digital asset indices ·{' '}
+                          <Freshness fetchedAt={sectionMeta.crypto?.fetchedAt} maxAgeMs={SECTIONS.crypto.maxAgeMs} now={currentTime.getTime()} />
+                        </p>
                       </div>
                       {/* Filter Pill */}
                       <div className="relative">
@@ -2137,7 +2515,7 @@ export default function App() {
                     <div className="overflow-x-auto">
                       <table className="w-full text-left border-collapse">
                         <thead>
-                          <tr className="border-b border-border-hairline text-[11px] font-sans font-semibold text-text-muted">
+                          <tr className="border-b border-border-hairline text-[12.5px] font-sans font-semibold text-text-muted">
                             <th className="pb-3">Asset Pair</th>
                             <th className="pb-3 text-right">Price</th>
                             <th className="pb-3 text-right">24h Change</th>
@@ -2145,189 +2523,76 @@ export default function App() {
                           </tr>
                         </thead>
                         <tbody className="text-xs font-sans divide-y divide-border-hairline">
-                          {filteredCoins.slice(0, 4).map((coin) => (
+                          {filteredCoins.slice(0, 4).map((coin, _i, rows) => {
+                            const topMoverId = rows.reduce((best, c) => (Math.abs(c.change24h) > Math.abs(best.change24h) ? c : best), rows[0])?.id;
+                            const isTopMover = coin.id === topMoverId && rows.length > 1;
+                            return (
                             <tr key={coin.id} className="hover:bg-surface-2 cursor-pointer transition-colors" onClick={() => { setSelectedCoinId(coin.id); setActiveTab('crypto'); }}>
                               <td className="py-3 flex items-center gap-2.5">
                                 <CryptoLogo symbol={coin.symbol} size={6} />
                                 <div>
-                                  <p className="font-medium text-text-primary leading-tight">{coin.name}</p>
-                                  <p className="text-[10px] text-text-secondary capitalize leading-tight">Crypto Index</p>
+                                  <p className="font-semibold text-text-primary leading-tight flex items-center gap-1.5">
+                                    {coin.name}
+                                    {isTopMover && <StatusBadge tone="info" progress={null} size="xs">Top mover</StatusBadge>}
+                                  </p>
+                                  <p className="text-[11.5px] text-text-muted uppercase tracking-wide leading-tight mt-0.5">{coin.symbol}</p>
                                 </div>
                               </td>
                               <td className="py-3 text-right font-mono font-medium text-text-primary tabular-nums">
                                 {formatPrice(coin.price)}
                               </td>
-                              <td className={`py-3 text-right font-mono font-medium tabular-nums ${coin.change24h >= 0 ? 'text-status-success' : 'text-status-danger'
+                              <td className={`py-3 text-right font-mono font-semibold tabular-nums ${coin.change24h >= 0 ? 'text-status-success' : 'text-status-danger'
                                 }`}>
-                                {coin.change24h >= 0 ? '+' : ''}{coin.change24h.toFixed(2)}%
+                                {coin.change24h >= 0 ? '▲' : '▼'} {Math.abs(coin.change24h).toFixed(2)}%
                               </td>
                               <td className="py-3 text-center hidden sm:table-cell">
-                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-sans font-semibold ${coin.change24h >= 0 ? 'bg-status-success-bg text-status-success' : 'bg-status-danger-bg text-status-danger'
-                                  }`}>
-                                  {coin.change24h >= 0 ? <PhosphorIcon name="trending-up" className="text-[10px]" /> : <PhosphorIcon name="trending-down" className="text-[10px]" />}
+                                <StatusBadge tone={coin.change24h >= 0 ? 'success' : 'critical'} progress={coin.change24h >= 0 ? 'complete' : 'incomplete'}>
                                   {coin.change24h >= 0 ? 'Bullish' : 'Bearish'}
-                                </span>
+                                </StatusBadge>
                               </td>
                             </tr>
-                          ))}
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
                   </div>
 
-                  {/* Bottom line chart card (Primary feature panel - keeping border + 2px top accent border) */}
-                  <div className="border border-border-hairline border-t-2 border-t-status-warning rounded-2xl md:rounded-3xl bg-surface-1 p-4 md:p-6 shadow-xs">
-                    <div className="flex items-center justify-between mb-4">
-                      <div>
-                        <h3 className="font-sans font-medium text-sm text-text-primary tracking-tight">{activeCoin?.name} Live Feed</h3>
-                        <p className="text-xs text-text-secondary">Aggregated hourly price activity (24 hours)</p>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-sans text-[10px] font-medium text-text-secondary bg-surface-2 px-2.5 py-0.5 rounded-full border border-border-hairline">
-                          {activeCoin?.symbol} to USD
-                        </span>
-                      </div>
-                    </div>
-                    <PriceTrendChart data={activeCoin?.sparkline || []} name={activeCoin?.name || 'Index'} />
-                  </div>
+                  {/* 24h price card for the selected coin */}
+                  {activeCoin && (
+                    <DashboardPriceCard
+                      coin={activeCoin}
+                      format={(v) => formatPrice(v)}
+                      logo={<CryptoLogo symbol={activeCoin.symbol} size={9} />}
+                      updated={<Freshness fetchedAt={sectionMeta.crypto?.fetchedAt} maxAgeMs={SECTIONS.crypto.maxAgeMs} now={currentTime.getTime()} />}
+                      href={pathForTab('crypto')}
+                      onOpen={(e) => {
+                        if (isModifiedClick(e)) return;
+                        e.preventDefault();
+                        setSelectedCoinId(activeCoin.id);
+                        setActiveTab('crypto');
+                      }}
+                    />
+                  )}
 
                 </div>
 
                 {/* Right Column (Global Snapshot Dark Card + Air Quality Gauge) — Span 3 - order-2 on mobile */}
-                <div className="lg:col-span-3 flex flex-col gap-4 md:gap-6 order-2 lg:order-none">
+                <div className={`lg:col-span-3 flex-col gap-4 md:gap-6 order-2 lg:order-none lg:flex ${dashMobileSection === 'air' ? 'flex' : 'hidden'}`}>
 
-                  {/* Global Snapshot dark card (Keeping border + 2px top accent border) */}
-                  <div className="border border-border-hairline border-t-2 border-t-status-accent rounded-2xl md:rounded-3xl bg-surface-2 p-4 md:p-5 shadow-sm flex flex-col justify-between min-h-[220px] md:min-h-[250px] relative overflow-hidden" id="aqi-global-snapshot-card">
-                    {(() => {
-                      const formatAqiTime = (lastUpdated: any) => {
-                        if (!lastUpdated) return 'Recently';
-                        const d = new Date(lastUpdated);
-                        if (isNaN(d.getTime())) return 'Recently';
-                        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false }) + ' UTC';
-                      };
-
-                      const aqiStatusMap = {
-                        Good: {
-                          colorClass: 'text-status-success border-status-success/20 bg-status-success-bg/10',
-                          dotClass: 'bg-status-success',
-                          badgeText: 'Good',
-                          textColor: 'text-status-success',
-                          insight: 'Air quality is satisfactory. Safe for all normal outdoor activities.',
-                        },
-                        Moderate: {
-                          colorClass: 'text-status-warning border-status-warning/20 bg-status-warning-bg/10',
-                          dotClass: 'bg-status-warning',
-                          badgeText: 'Moderate',
-                          textColor: 'text-status-warning',
-                          insight: 'Acceptable air quality. Sensitive groups should limit prolonged outdoor exertion.',
-                        },
-                        'Unhealthy for Sensitive Groups': {
-                          colorClass: 'text-orange-500 border-orange-500/20 bg-orange-500/10',
-                          dotClass: 'bg-orange-500',
-                          badgeText: 'Sensitive Groups',
-                          textColor: 'text-orange-500',
-                          insight: 'Sensitive groups may experience health effects. General public not likely affected.',
-                        },
-                        Unhealthy: {
-                          colorClass: 'text-status-danger border-status-danger/20 bg-status-danger-bg/10',
-                          dotClass: 'bg-status-danger',
-                          badgeText: 'Unhealthy',
-                          textColor: 'text-status-danger',
-                          insight: 'Elevated risk. Everyone should consider reducing heavy outdoor activities.',
-                        },
-                        'Very Unhealthy': {
-                          colorClass: 'text-purple-500 border-purple-500/20 bg-purple-500/10',
-                          dotClass: 'bg-purple-500',
-                          badgeText: 'Very Unhealthy',
-                          textColor: 'text-purple-500',
-                          insight: 'Health alert: everyone may experience more serious health effects.',
-                        },
-                        Hazardous: {
-                          colorClass: 'text-status-danger border-status-danger/20 bg-status-danger-bg/10',
-                          dotClass: 'bg-status-danger',
-                          badgeText: 'Hazardous',
-                          textColor: 'text-status-danger',
-                          insight: 'Dangerous health effects. Avoid any outdoor physical activities.',
-                        }
-                      };
-                      const aqiStatus = activeAQI?.status || 'Good';
-                      const aqiConfig = aqiStatusMap[aqiStatus as keyof typeof aqiStatusMap] || aqiStatusMap.Good;
-
-                      return (
-                        <>
-                          {/* Top Row: Title + Status Badge */}
-                          <div className="flex flex-col gap-1.5" id="aqi-card-header">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-1.5">
-                                <PhosphorIcon name="wind" className="text-sm text-status-accent animate-pulse" />
-                                <span className="font-sans text-xs font-semibold text-text-primary">Air Quality in {activeAQI ? activeAQI.city : selectedCity}</span>
-                              </div>
-                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-sans font-semibold border transition-colors ${aqiConfig.colorClass}`}>
-                                <span className={`w-1.5 h-1.5 rounded-full ${aqiConfig.dotClass}`} />
-                                {aqiConfig.badgeText}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1.5 text-text-primary mt-0.5">
-                              <PhosphorIcon name="globe" className="text-xs text-text-muted" />
-                              <span className="font-sans font-medium text-xs text-text-secondary">
-                                {activeAQI ? `${activeAQI.city}, ${activeAQI.country}` : selectedCity}
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Middle Row: Primary Prominent AQI Value + Level Indicator */}
-                          <div className="flex flex-col items-center justify-center my-4 py-3 border-y border-border-hairline/30" id="aqi-card-focal-point">
-                            <div className="flex items-baseline gap-2">
-                              <span className={`font-sans font-light text-5xl md:text-6xl tracking-tight leading-none tabular-nums transition-colors ${aqiConfig.textColor}`}>
-                                {activeAQI?.aqi || '--'}
-                              </span>
-                              <span className="text-text-muted text-[11px] font-sans font-medium">Air Quality</span>
-                            </div>
-                            <div className="mt-1.5 flex items-center gap-1.5">
-                              <span className={`w-1.5 h-1.5 rounded-full ${aqiConfig.dotClass} animate-pulse`} />
-                              <span className={`text-[11px] font-sans font-semibold tracking-wide transition-colors ${aqiConfig.textColor}`}>{aqiConfig.badgeText} Air Quality</span>
-                            </div>
-                          </div>
-
-                          {/* Bottom Row: Contextual Insight & Last Updated */}
-                          <div className="flex flex-col gap-3" id="aqi-card-footer">
-                            <p className="text-[11px] text-text-secondary text-center leading-relaxed font-sans max-w-xs mx-auto">
-                              {aqiConfig.insight}
-                            </p>
-                            <div className="flex items-center justify-between text-[10px] font-sans text-text-muted border-t border-border-hairline/45 pt-2.5">
-                              <div className="flex items-center gap-1">
-                                <span className="w-1 h-1 rounded-full bg-status-success" />
-                                <span>Online</span>
-                              </div>
-                              <span>
-                                Last updated: {formatAqiTime(activeAQI?.lastUpdated)}
-                              </span>
-                            </div>
-                          </div>
-                        </>
-                      );
-                    })()}
-                  </div>
-
-                  {/* Donut gauge box (Styled inside StatGauge to be borderless and flat) */}
-                  <StatGauge
-                    value={activeAQI?.aqi || 50}
-                    max={250}
-                    title="Focused Air Index"
-                    subtitle="Monitored from regional sensor"
-                    label={`${activeAQI?.aqi} AQI`}
-                    colorClass={
-                      (() => {
-                        const a = activeAQI?.aqi || 50;
-                        if (a <= 50) return 'text-status-success';
-                        if (a <= 100) return 'text-status-warning';
-                        if (a <= 150) return 'text-orange-500';
-                        if (a <= 200) return 'text-status-danger';
-                        if (a <= 300) return 'text-purple-500';
-                        return 'text-status-danger';
-                      })()
-                    }
-                  />
+                  {/* Air quality summary for the selected city */}
+                  {activeAQI && (
+                    <DashboardAirCard
+                      aqi={activeAQI}
+                      href={pathForTab('aqi')}
+                      onOpen={(e) => {
+                        if (isModifiedClick(e)) return;
+                        e.preventDefault();
+                        setActiveTab('aqi');
+                      }}
+                      updated={<Freshness fetchedAt={sectionMeta.aqi?.fetchedAt} maxAgeMs={SECTIONS.aqi.maxAgeMs} now={currentTime.getTime()} />}
+                    />
+                  )}
 
                 </div>
 
@@ -2335,866 +2600,508 @@ export default function App() {
             </div>
           )}
 
+          {/* ==================== UPDATES (full alerts feed) ==================== */}
+          {activeTab === 'updates' && (() => {
+            const severityCounts = {
+              all: alerts.length,
+              'needs-attention': alerts.filter(a => a.severity === 'needs-attention').length,
+              fyi: alerts.filter(a => a.severity === 'fyi').length,
+            };
+            const categories = [
+              { id: 'all', label: 'All topics' },
+              { id: 'crypto', label: 'Crypto' },
+              { id: 'currency', label: 'Currency' },
+              { id: 'weather', label: 'Weather' },
+              { id: 'aqi', label: 'Air quality' },
+            ] as const;
+            const filtered = alerts
+              .filter(a => updatesSeverity === 'all' || a.severity === updatesSeverity)
+              .filter(a => updatesCategory === 'all' || a.category === updatesCategory)
+              .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            const shown = filtered.slice(0, updatesLimit);
+
+            // Group by calendar day: Today / Yesterday / date
+            const dayLabel = (iso: string) => {
+              const d = new Date(iso);
+              const today = new Date();
+              const yesterday = new Date();
+              yesterday.setDate(today.getDate() - 1);
+              if (d.toDateString() === today.toDateString()) return 'Today';
+              if (d.toDateString() === yesterday.toDateString()) return 'Yesterday';
+              return d.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' });
+            };
+            const groups: { label: string; items: typeof shown }[] = [];
+            shown.forEach(item => {
+              const label = dayLabel(item.createdAt);
+              const last = groups[groups.length - 1];
+              if (last && last.label === label) last.items.push(item);
+              else groups.push({ label, items: [item] });
+            });
+
+            return (
+              <div className="flex flex-col gap-4 animate-fade-in" id="updates-tab-view">
+                {/* Toolbar */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                  <div className="segmented segmented-full md:w-auto md:inline-flex" role="group" aria-label="Filter by importance">
+                    {([
+                      ['all', 'All', 'All'],
+                      ['needs-attention', 'Attention', 'Needs attention'],
+                      ['fyi', 'Info', 'For your info'],
+                    ] as const).map(([id, shortLabel, label]) => (
+                      <button key={id} aria-pressed={updatesSeverity === id} onClick={() => { setUpdatesSeverity(id); setUpdatesLimit(20); }} className="whitespace-nowrap md:flex-none md:px-3.5">
+                        <span className="md:hidden">{shortLabel}</span>
+                        <span className="hidden md:inline">{label}</span>{' '}
+                        <span className="text-text-muted tabular-nums">{severityCounts[id]}</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2 overflow-x-auto scrollbar-none -mx-4 px-4 md:mx-0 md:px-0">
+                    {categories.map(c => (
+                      <button
+                        key={c.id}
+                        onClick={() => { setUpdatesCategory(c.id); setUpdatesLimit(20); }}
+                        aria-pressed={updatesCategory === c.id}
+                        className={`h-9 px-3 shrink-0 rounded-lg text-[13px] font-medium border transition-colors cursor-pointer ${updatesCategory === c.id ? 'bg-text-primary text-surface-0 border-text-primary' : 'bg-surface-1 text-text-secondary border-border-hairline hover:border-border-strong hover:text-text-primary'}`}
+                      >
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Feed */}
+                <section className="card" aria-labelledby="updates-feed-title">
+                  <div className="flex items-center justify-between gap-3 px-4 md:px-5 py-3.5 border-b border-border-hairline">
+                    <div className="min-w-0">
+                      <h2 id="updates-feed-title" className="card-title">
+                        {filtered.length} {filtered.length === 1 ? 'update' : 'updates'}
+                      </h2>
+                      <p className="card-subtitle">
+                        {lastSyncedTime ? `Last checked ${lastSyncedTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : 'Checking for updates…'}
+                      </p>
+                    </div>
+                    {wsStatus === 'connected' ? (
+                      <StatusBadge tone="success" progress="complete">Live</StatusBadge>
+                    ) : wsStatus === 'reconnecting' || wsStatus === 'connecting' ? (
+                      <StatusBadge tone="attention" progress="partial">Reconnecting</StatusBadge>
+                    ) : (
+                      <StatusBadge tone="critical" progress="incomplete">Offline</StatusBadge>
+                    )}
+                  </div>
+
+                  {filtered.length === 0 ? (
+                    <div className="flex flex-col items-center text-center gap-2 px-6 py-12">
+                      <span className="w-10 h-10 rounded-full bg-status-success-bg text-status-success flex items-center justify-center">
+                        <PhosphorIcon name="check-circle" size={20} />
+                      </span>
+                      <p className="text-[15px] font-medium text-text-primary">
+                        {alerts.length === 0 ? 'All quiet for now' : 'No updates match these filters'}
+                      </p>
+                      <p className="text-[13px] text-text-secondary max-w-sm">
+                        {alerts.length === 0
+                          ? 'Price spikes, weather changes and air-quality shifts will appear here as they happen.'
+                          : 'Try another topic or switch back to all updates.'}
+                      </p>
+                      {alerts.length > 0 && (
+                        <button className="btn btn-secondary btn-sm mt-2" onClick={() => { setUpdatesSeverity('all'); setUpdatesCategory('all'); }}>
+                          Clear filters
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="px-4 md:px-5 pb-2">
+                      {groups.map(group => (
+                        <div key={group.label}>
+                          <p className="eyebrow pt-4 pb-1">{group.label}</p>
+                          <div className="flex flex-col divide-y divide-border-hairline">
+                            {group.items.map(item => (
+                              <React.Fragment key={item.id}>
+                                <AlertsItem
+                                  item={item}
+                                  tone={item.severity === 'needs-attention' ? 'warning' : 'info'}
+                                  icon={<PhosphorIcon name={item.icon} size={16} />}
+                                  relativeTime={getRelativeTime(item.createdAt)}
+                                  isExpanded={!!expandedAlerts[item.id]}
+                                  isNew={newlyArrivedIds.has(item.id)}
+                                  onToggle={() => setExpandedAlerts(prev => ({ ...prev, [item.id]: !prev[item.id] }))}
+                                />
+                              </React.Fragment>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                      {filtered.length > shown.length && (
+                        <button className="btn btn-secondary w-full my-3 h-11 md:h-9" onClick={() => setUpdatesLimit(l => l + 20)}>
+                          Show {Math.min(20, filtered.length - shown.length)} more
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </section>
+              </div>
+            );
+          })()}
+
+          {/* ==================== NOT FOUND ==================== */}
+          {activeTab === NOT_FOUND_TAB && (
+            <section className="card card-pad flex flex-col items-center text-center gap-3 py-14 animate-fade-in" id="not-found-view">
+              <span className="w-12 h-12 rounded-full bg-surface-2 text-text-secondary flex items-center justify-center">
+                <PhosphorIcon name="compass" size={22} />
+              </span>
+              <p className="text-[15px] font-medium text-text-primary">We couldn’t find {window.location.pathname}</p>
+              <p className="text-[13px] text-text-secondary max-w-sm">The link may be old or mistyped. Head back to the dashboard or pick a page from the menu.</p>
+              <button className="btn btn-primary mt-2" onClick={() => setActiveTab('dashboard')}>Go to dashboard</button>
+            </section>
+          )}
+
           {/* ==================== TAB 2: CRYPTO LIST ==================== */}
           {activeTab === 'crypto' && (() => {
             const sparkline = activeCoin?.sparkline || [];
             const highestPrice = sparkline.length > 0 ? Math.max(...sparkline) : (activeCoin?.price || 0);
             const lowestPrice = sparkline.length > 0 ? Math.min(...sparkline) : (activeCoin?.price || 0);
+            const cryptoChange = activeCoin?.change24h || 0;
+            const cryptoIsUp = cryptoChange >= 0;
+            const cryptoChangeText = `${cryptoIsUp ? '▲' : '▼'} ${Math.abs(cryptoChange).toFixed(2)}%`;
+            const cryptoAll = data.crypto || [];
 
-            const movementSentence = (activeCoin?.change24h || 0) >= 0
-              ? `${activeCoin?.name || 'Bitcoin'} gained momentum today, rising by ${Math.abs(activeCoin?.change24h || 0).toFixed(2)}% over the last 24 hours.`
-              : `${activeCoin?.name || 'Bitcoin'} declined slightly over the last 24 hours, falling by ${Math.abs(activeCoin?.change24h || 0).toFixed(2)}%.`;
+            const movementSentence = cryptoIsUp
+              ? `${activeCoin?.name || 'Bitcoin'} is up ${Math.abs(cryptoChange).toFixed(2)}% over the last 24 hours.`
+              : `${activeCoin?.name || 'Bitcoin'} is down ${Math.abs(cryptoChange).toFixed(2)}% over the last 24 hours.`;
 
-            const otherCoins = [...(data.crypto || [])]
+            const otherCoins = [...cryptoAll]
               .filter(c => c.id !== selectedCoinId)
               .sort((a, b) => b.change24h - a.change24h)
-              .slice(0, 2);
+              .slice(0, 3);
+
+            // One filtered + sorted list shared by the mobile Markets view and the desktop sidebar
+            const cryptoQuery = cryptoSearch.trim().toLowerCase();
+            const cryptoSorted = cryptoAll
+              .filter(c => c.name.toLowerCase().includes(cryptoQuery) || c.symbol.toLowerCase().includes(cryptoQuery))
+              .sort((a, b) => {
+                let valA: number;
+                let valB: number;
+                if (cryptoSortField === 'price') {
+                  valA = a.price;
+                  valB = b.price;
+                } else if (cryptoSortField === 'change') {
+                  valA = a.change24h;
+                  valB = b.change24h;
+                } else {
+                  valA = a.rank;
+                  valB = b.rank;
+                }
+                return cryptoSortDirection === 'asc' ? valA - valB : valB - valA;
+              });
+            const cryptoListLimit = 5;
+            const cryptoMobileList = tabletLeaderboardExpanded ? cryptoSorted : cryptoSorted.slice(0, cryptoListLimit);
+
+            const cryptoToggleSort = (field: 'rank' | 'price' | 'change') => {
+              if (cryptoSortField === field) {
+                setCryptoSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+              } else {
+                setCryptoSortField(field);
+                setCryptoSortDirection(field === 'rank' ? 'asc' : 'desc');
+              }
+            };
+
+            const cryptoTimeframes = [
+              { id: '24h', label: '1D' },
+              { id: '7d', label: '7D' },
+              { id: '30d', label: '1M' },
+              { id: '1y', label: '1Y' },
+            ] as const;
+
+            const cryptoStats = [
+              { label: 'Day high', value: formatPrice(highestPrice) },
+              { label: 'Day low', value: formatPrice(lowestPrice) },
+              { label: 'Market cap', value: formatLargeNumber(activeCoin?.marketCap || 0) },
+              { label: 'Volume (24h)', value: formatLargeNumber(activeCoin?.volume24h || 0) },
+            ];
+
+            const renderCryptoTimeframes = (full: boolean) => (
+              <div className={`segmented shrink-0 ${full ? 'segmented-full [&>button]:h-10' : ''}`} role="group" aria-label="Chart timeframe">
+                {cryptoTimeframes.map(tf => (
+                  <button key={tf.id} type="button" onClick={() => setChartTimeframe(tf.id)} aria-pressed={chartTimeframe === tf.id}>
+                    {tf.label}
+                  </button>
+                ))}
+              </div>
+            );
+
+            const renderCryptoSort = (mobile: boolean) => (
+              <div className={`segmented segmented-full ${mobile ? '[&>button]:h-10' : ''}`} role="group" aria-label="Sort coins">
+                {([['rank', 'Rank'], ['price', 'Price'], ['change', mobile ? '24h' : '24h change']] as const).map(([field, label]) => (
+                  <button key={field} type="button" onClick={() => cryptoToggleSort(field)} aria-pressed={cryptoSortField === field}>
+                    {label}{cryptoSortField === field ? (cryptoSortDirection === 'asc' ? ' ↑' : ' ↓') : ''}
+                  </button>
+                ))}
+              </div>
+            );
+
+            const cryptoSearchField = (
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none">
+                  <PhosphorIcon name="search" size={15} />
+                </span>
+                <input
+                  type="text"
+                  placeholder="Search by name or symbol"
+                  aria-label="Search coins"
+                  value={cryptoSearch}
+                  onChange={(e) => setCryptoSearch(e.target.value)}
+                  className="w-full h-10 pl-9 pr-10 rounded-lg bg-surface-2 border border-border-hairline font-sans text-[14px] text-text-primary placeholder:text-text-muted focus:outline-none focus:border-border-strong focus:bg-surface-1 transition-colors"
+                />
+                {cryptoSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setCryptoSearch('')}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 w-8 h-8 inline-flex items-center justify-center rounded-md text-text-muted hover:text-text-primary hover:bg-surface-3 cursor-pointer"
+                    aria-label="Clear search"
+                  >
+                    <PhosphorIcon name="x" size={14} />
+                  </button>
+                )}
+              </div>
+            );
+
+            const cryptoEmpty = (
+              <div className="py-10 px-4 flex flex-col items-center text-center gap-1.5">
+                <span className="w-10 h-10 rounded-full bg-surface-2 inline-flex items-center justify-center text-text-muted mb-1">
+                  <PhosphorIcon name="search" size={18} />
+                </span>
+                <p className="text-[14px] font-medium text-text-primary">No coins found</p>
+                <p className="text-[13px] text-text-muted">Nothing matches "{cryptoSearch}".</p>
+                <button type="button" onClick={() => setCryptoSearch('')} className="btn btn-secondary btn-sm mt-2">
+                  Clear search
+                </button>
+              </div>
+            );
+
+            const renderCryptoRow = (coin: CryptoCoin, extraClass = '') => {
+              const isSelected = coin.id === selectedCoinId;
+              const up = coin.change24h >= 0;
+              return (
+                <button
+                  type="button"
+                  key={coin.id}
+                  onClick={() => setSelectedCoinId(coin.id)}
+                  className={`list-row min-h-[52px] ${extraClass}`}
+                  aria-selected={isSelected}
+                >
+                  <span className="w-6 shrink-0 text-[13px] text-text-muted tabular-nums">{coin.rank}</span>
+                  <div className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center bg-surface-2 shrink-0">
+                    <CryptoLogo symbol={coin.symbol} size={8} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[14px] font-medium text-text-primary truncate">{coin.name}</p>
+                    <p className="text-[12px] text-text-muted">{coin.symbol.toUpperCase()}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-[14px] font-medium text-text-primary tabular-nums">{formatPrice(coin.price)}</p>
+                    <p className={`text-[12px] font-medium tabular-nums ${up ? 'text-status-success' : 'text-status-danger'}`}>
+                      {up ? '▲' : '▼'} {Math.abs(coin.change24h).toFixed(2)}%
+                    </p>
+                  </div>
+                </button>
+              );
+            };
 
             return (
-              <div className="w-full mx-auto p-1 md:p-3 animate-slide-up" id="crypto-tab-view">
+              <div className="w-full mx-auto md:p-3 animate-slide-up" id="crypto-tab-view">
 
                 {/* ==================== MOBILE LAYOUT (< 768px) ==================== */}
-                <div className="block md:hidden max-w-[440px] mx-auto">
-                  {/* Persistent Card Container */}
-                  <div className="flex flex-col gap-5 bg-surface-1 border border-border-hairline rounded-3xl p-5 shadow-xs">
+                {/* Hero (coin + price + 24h change) stays on top; sections switch below so each view is ~1 screen */}
+                <div className="flex md:hidden flex-col gap-3 max-w-[480px] mx-auto">
 
-                    {/* Persistent header */}
-                    <div className="flex flex-col gap-3">
-                      {/* Coin info & Meta */}
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full overflow-hidden flex items-center justify-center bg-surface-2 shrink-0">
-                          <CryptoLogo symbol={activeCoin?.symbol || ''} size={9} />
-                        </div>
-                        <div className="min-w-0">
-                          <h2 className="font-sans font-medium text-base text-text-primary leading-tight">
-                            {activeCoin?.name}
-                          </h2>
-                          <p className="text-[12px] text-text-secondary font-normal mt-0.5 truncate">
-                            Global rank #{activeCoin?.rank} · {activeCoin?.tags?.join(' · ')}
-                          </p>
-                        </div>
+                  {/* Selected coin hero */}
+                  <section className="card px-4 py-3.5" aria-label="Selected coin">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full overflow-hidden flex items-center justify-center bg-surface-2 shrink-0">
+                        <CryptoLogo symbol={activeCoin?.symbol || ''} size={8} />
                       </div>
-
-                      {/* Price hero */}
-                      <div className="flex items-baseline gap-2">
-                        <span className="font-sans font-medium text-[22px] tracking-tight text-text-primary tabular-nums">
-                          {formatPrice(activeCoin?.price)}
-                        </span>
-                        <span className={`font-sans font-normal text-[13px] inline-flex items-center gap-0.5 ${(activeCoin?.change24h || 0) >= 0 ? 'text-status-success' : 'text-status-danger'
-                          }`}>
-                          {(activeCoin?.change24h || 0) >= 0 ? '▲' : '▼'} {Math.abs(activeCoin?.change24h || 0).toFixed(2)}%
-                        </span>
-                      </div>
-
-                      {/* Segmented tab control */}
-                      <div className="bg-surface-2 p-1 rounded-full flex w-full" id="crypto-segmented-control-mobile">
-                        {(['overview', 'chart', 'leaderboard'] as const).map((tab) => {
-                          const isActive = cryptoSubTab === tab;
-                          return (
-                            <button
-                              key={tab}
-                              onClick={() => setCryptoSubTab(tab)}
-                              className={`flex-1 py-1.5 text-center text-[12px] font-medium rounded-full cursor-pointer transition-all ${isActive
-                                ? 'bg-surface-1 text-text-primary'
-                                : 'text-text-secondary hover:text-text-primary'
-                                }`}
-                            >
-                              {tab.charAt(0).toUpperCase() + tab.slice(1)}
-                            </button>
-                          );
-                        })}
-                      </div>
+                      <h2 className="flex-1 min-w-0 text-[15px] font-semibold text-text-primary leading-tight truncate">
+                        {activeCoin?.name} <span className="font-normal text-text-muted">{activeCoin?.symbol?.toUpperCase()}</span>
+                      </h2>
+                      <StatusBadge tone="neutral" progress={null} size="xs">#{activeCoin?.rank}</StatusBadge>
                     </div>
-
-                    {/* Tab content area */}
-                    <div className="min-h-[280px]">
-
-                      {/* TAB 1: OVERVIEW */}
-                      {cryptoSubTab === 'overview' && (
-                        <div className="flex flex-col gap-4 animate-fade-in" id="crypto-tab-overview-mobile">
-                          {/* Horizontally-scrollable stat tiles */}
-                          <div className="flex overflow-x-auto gap-3 pb-2 scrollbar-none snap-x snap-mandatory">
-                            {/* Card 1: 24h Change */}
-                            <div className="flex-shrink-0 w-[110px] bg-surface-2 p-3 rounded-xl snap-start flex flex-col justify-between h-[68px]">
-                              <p className="text-[10px] font-sans font-medium text-text-secondary leading-none">24h change</p>
-                              <p className={`font-sans font-medium text-xs tabular-nums mt-0.5 ${(activeCoin?.change24h || 0) >= 0 ? 'text-status-success' : 'text-status-danger'}`}>
-                                {(activeCoin?.change24h || 0) >= 0 ? '+' : ''}{(activeCoin?.change24h || 0).toFixed(2)}%
-                              </p>
-                            </div>
-
-                            {/* Card 2: High Today */}
-                            <div className="flex-shrink-0 w-[110px] bg-surface-2 p-3 rounded-xl snap-start flex flex-col justify-between h-[68px]">
-                              <p className="text-[10px] font-sans font-medium text-text-secondary leading-none">High today</p>
-                              <p className="font-sans font-medium text-xs text-text-primary tabular-nums mt-0.5 truncate">
-                                {formatPrice(highestPrice)}
-                              </p>
-                            </div>
-
-                            {/* Card 3: Low Today */}
-                            <div className="flex-shrink-0 w-[110px] bg-surface-2 p-3 rounded-xl snap-start flex flex-col justify-between h-[68px]">
-                              <p className="text-[10px] font-sans font-medium text-text-secondary leading-none">Low today</p>
-                              <p className="font-sans font-medium text-xs text-text-primary tabular-nums mt-0.5 truncate">
-                                {formatPrice(lowestPrice)}
-                              </p>
-                            </div>
-
-                            {/* Card 4: Market Cap */}
-                            <div className="flex-shrink-0 w-[110px] bg-surface-2 p-3 rounded-xl snap-start flex flex-col justify-between h-[68px]">
-                              <p className="text-[10px] font-sans font-medium text-text-secondary leading-none">Market cap</p>
-                              <p className="font-sans font-medium text-xs text-text-primary tabular-nums mt-0.5 truncate">
-                                {formatLargeNumber(activeCoin?.marketCap || 0)}
-                              </p>
-                            </div>
-                          </div>
-
-                          {/* Movement summary sentence */}
-                          <p className="text-[13px] text-text-secondary leading-relaxed font-normal max-w-full">
-                            {movementSentence}
-                          </p>
-
-                          {/* Top Movers Preview */}
-                          <div className="mt-2">
-                            <h3 className="text-[11px] font-medium tracking-wide text-text-secondary uppercase mb-2">Top movers</h3>
-                            <div className="flex flex-col divide-y divide-border-hairline/40">
-                              {otherCoins.map((coin) => (
-                                <div
-                                  key={coin.id}
-                                  onClick={() => setSelectedCoinId(coin.id)}
-                                  className="flex items-center justify-between py-2 cursor-pointer hover:opacity-80 transition-opacity"
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <div className="w-6 h-6 rounded-full overflow-hidden flex items-center justify-center bg-surface-2">
-                                      <CryptoLogo symbol={coin.symbol} size={6} />
-                                    </div>
-                                    <span className="text-xs font-normal text-text-primary">{coin.name}</span>
-                                  </div>
-                                  <span className={`text-xs font-mono font-medium ${coin.change24h >= 0 ? 'text-status-success' : 'text-status-danger'
-                                    }`}>
-                                    {coin.change24h >= 0 ? '+' : ''}{coin.change24h.toFixed(2)}%
-                                  </span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* Navigation link to full leaderboard */}
-                          <div className="mt-4 text-center border-t border-border-hairline/40 pt-3">
-                            <button
-                              onClick={() => setCryptoSubTab('leaderboard')}
-                              className="text-status-accent hover:underline text-[12px] font-medium cursor-pointer transition-colors"
-                            >
-                              View full leaderboard
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* TAB 2: CHART */}
-                      {cryptoSubTab === 'chart' && (
-                        <div className="flex flex-col gap-4 animate-fade-in" id="crypto-tab-chart-mobile">
-                          {/* Timeframe selector */}
-                          <div className="flex gap-1.5 flex-nowrap overflow-x-auto scrollbar-none">
-                            {(['24h', '7d', '30d', '1y'] as const).map(tf => {
-                              const label = tf === '24h' ? '1D' : tf === '30d' ? '1M' : tf.toUpperCase();
-                              return (
-                                <button
-                                  key={tf}
-                                  onClick={() => setChartTimeframe(tf)}
-                                  className={`text-[11px] font-mono px-3.5 py-2 min-h-[36px] flex items-center justify-center rounded-full cursor-pointer transition-colors shrink-0 ${chartTimeframe === tf
-                                    ? 'bg-text-primary text-surface-1 font-semibold'
-                                    : 'bg-surface-2 text-text-secondary hover:text-text-primary'
-                                    }`}
-                                >
-                                  {label}
-                                </button>
-                              );
-                            })}
-                          </div>
-
-                          {/* Chart Component */}
-                          <div className="bg-surface-2 rounded-xl p-3 h-[200px] flex items-center justify-center">
-                            <PriceTrendChart
-                              data={sparkline}
-                              name={activeCoin?.name || 'Ticker'}
-                              height="h-[140px]"
-                              timeframe={chartTimeframe}
-                            />
-                          </div>
-
-                          {/* High/Low restated below chart */}
-                          <div className="flex justify-between items-center bg-surface-2 px-4 py-2.5 rounded-xl text-xs font-medium text-text-primary mt-1 gap-2">
-                            <div className="flex items-center">
-                              <span className="text-text-secondary text-[11px] uppercase mr-1.5">High</span>
-                              <span className="tabular-nums font-medium block sm:hidden">{highestPrice >= 1000 ? `$${(highestPrice / 1000).toFixed(1)}k` : formatPrice(highestPrice)}</span>
-                              <span className="tabular-nums font-medium hidden sm:block">{formatPrice(highestPrice)}</span>
-                            </div>
-                            <div className="flex items-center">
-                              <span className="text-text-secondary text-[11px] uppercase mr-1.5">Low</span>
-                              <span className="tabular-nums font-medium block sm:hidden">{lowestPrice >= 1000 ? `$${(lowestPrice / 1000).toFixed(1)}k` : formatPrice(lowestPrice)}</span>
-                              <span className="tabular-nums font-medium hidden sm:block">{formatPrice(lowestPrice)}</span>
-                            </div>
-                          </div>
-
-                          {/* Export CSV button */}
-                          <div className="mt-2 w-full flex sm:justify-end">
-                            <button
-                              onClick={() => handleExportCSV('crypto')}
-                              className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-full border border-border-hairline hover:border-status-accent font-sans font-medium text-xs transition-colors cursor-pointer text-text-primary bg-transparent"
-                            >
-                              <PhosphorIcon name="download" className="text-sm" />
-                              Export CSV
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* TAB 3: LEADERBOARD */}
-                      {cryptoSubTab === 'leaderboard' && (() => {
-                        const filteredList = (data.crypto || []).filter(c =>
-                          c.name.toLowerCase().includes(cryptoSearch.toLowerCase()) ||
-                          c.symbol.toLowerCase().includes(cryptoSearch.toLowerCase())
-                        );
-
-                        const sortedCrypto = [...filteredList].sort((a, b) => {
-                          let valA: number;
-                          let valB: number;
-                          if (cryptoSortField === 'price') {
-                            valA = a.price;
-                            valB = b.price;
-                          } else if (cryptoSortField === 'change') {
-                            valA = a.change24h;
-                            valB = b.change24h;
-                          } else {
-                            valA = a.rank;
-                            valB = b.rank;
-                          }
-                          return cryptoSortDirection === 'asc' ? valA - valB : valB - valA;
-                        });
-
-                        return (
-                          <div className="flex flex-col gap-3 animate-fade-in" id="crypto-tab-leaderboard-mobile">
-                            {/* Watchlist Header and Search/Sort controls */}
-                            <div className="flex flex-col gap-2 border-b border-border-hairline pb-2.5">
-                              {/* Row 1: Header and Search Trigger */}
-                              <div className="flex items-center justify-between">
-                                <h3 className="font-sans font-medium text-[11px] uppercase tracking-wide text-text-secondary">Watchlist</h3>
-                                <button
-                                  onClick={() => {
-                                    setLeaderboardSearchOpen(!leaderboardSearchOpen);
-                                    if (leaderboardSearchOpen) setCryptoSearch('');
-                                  }}
-                                  className={`p-1.5 rounded-full cursor-pointer transition-colors ${leaderboardSearchOpen ? 'text-status-accent bg-surface-2' : 'text-text-secondary hover:text-text-primary bg-surface-2/40'
-                                    }`}
-                                  title="Search currencies"
-                                >
-                                  <PhosphorIcon name={leaderboardSearchOpen ? "x" : "search"} size={13} />
-                                </button>
-                              </div>
-
-                              {/* Row 2: Search Input (Full Width on mobile) */}
-                              {leaderboardSearchOpen && (
-                                <div className="relative w-full animate-fade-in">
-                                  <input
-                                    type="text"
-                                    placeholder="Search coins..."
-                                    value={cryptoSearch}
-                                    onChange={(e) => setCryptoSearch(e.target.value)}
-                                    className="w-full pl-8 pr-7 py-1.5 rounded-full bg-surface-2 border border-border-hairline font-sans text-xs focus:outline-none focus:border-border-strong text-text-primary"
-                                    autoFocus
-                                  />
-                                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted">
-                                    <PhosphorIcon name="search" size={12} />
-                                  </span>
-                                  {cryptoSearch && (
-                                    <button
-                                      onClick={() => setCryptoSearch('')}
-                                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary cursor-pointer"
-                                    >
-                                      <PhosphorIcon name="x" size={12} />
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-
-                              {/* Row 3: Sort Controls */}
-                              <div className="flex items-center justify-between pt-1">
-                                <span className="text-[9px] text-text-muted">Sort:</span>
-                                <div className="flex items-center gap-1.5">
-                                  <button
-                                    onClick={() => {
-                                      if (cryptoSortField === 'rank') {
-                                        setCryptoSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
-                                      } else {
-                                        setCryptoSortField('rank');
-                                        setCryptoSortDirection('asc');
-                                      }
-                                    }}
-                                    className={`text-[9px] font-mono px-2 py-0.5 rounded transition-all cursor-pointer ${cryptoSortField === 'rank' ? 'bg-surface-2 text-text-primary font-bold border border-border-hairline/40' : 'text-text-secondary hover:text-text-primary'
-                                      }`}
-                                    title="Sort by Rank"
-                                  >
-                                    Rank {cryptoSortField === 'rank' && (cryptoSortDirection === 'asc' ? '↑' : '↓')}
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      if (cryptoSortField === 'price') {
-                                        setCryptoSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
-                                      } else {
-                                        setCryptoSortField('price');
-                                        setCryptoSortDirection('desc');
-                                      }
-                                    }}
-                                    className={`text-[9px] font-mono px-2 py-0.5 rounded transition-all cursor-pointer ${cryptoSortField === 'price' ? 'bg-surface-2 text-text-primary font-bold border border-border-hairline/40' : 'text-text-secondary hover:text-text-primary'
-                                      }`}
-                                    title="Sort by Price"
-                                  >
-                                    Price {cryptoSortField === 'price' && (cryptoSortDirection === 'asc' ? '↑' : '↓')}
-                                  </button>
-                                  <button
-                                    onClick={() => {
-                                      if (cryptoSortField === 'change') {
-                                        setCryptoSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
-                                      } else {
-                                        setCryptoSortField('change');
-                                        setCryptoSortDirection('desc');
-                                      }
-                                    }}
-                                    className={`text-[9px] font-mono px-2 py-0.5 rounded transition-all cursor-pointer ${cryptoSortField === 'change' ? 'bg-surface-2 text-text-primary font-bold border border-border-hairline/40' : 'text-text-secondary hover:text-text-primary'
-                                      }`}
-                                    title="Sort by 24h Change"
-                                  >
-                                    24h change {cryptoSortField === 'change' && (cryptoSortDirection === 'asc' ? '↑' : '↓')}
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Compact rows container */}
-                            <div className="flex flex-col max-h-[340px] overflow-y-auto divide-y divide-border-hairline/40 pr-0.5">
-                              {sortedCrypto.length === 0 ? (
-                                <div className="py-6 text-center text-xs text-text-secondary">
-                                  No coins match "{cryptoSearch}"
-                                </div>
-                              ) : (
-                                sortedCrypto.map((coin) => {
-                                  const isSelected = coin.id === selectedCoinId;
-                                  return (
-                                    <div
-                                      key={coin.id}
-                                      onClick={() => setSelectedCoinId(coin.id)}
-                                      className={`py-2 px-1.5 transition-all cursor-pointer flex items-center justify-between group ${isSelected ? 'bg-surface-2/40 font-medium rounded-lg' : 'hover:bg-surface-2/20'
-                                        }`}
-                                    >
-                                      <div className="flex items-center gap-2.5">
-                                        <span className="font-mono text-[10px] text-text-secondary min-w-[14px]">#{coin.rank}</span>
-                                        <div className="w-6 h-6 rounded-full overflow-hidden flex items-center justify-center bg-surface-2">
-                                          <CryptoLogo symbol={coin.symbol} size={6} />
-                                        </div>
-                                        <div className="min-w-0">
-                                          <p className="text-xs text-text-primary truncate">{coin.name}</p>
-                                          <p className="text-[9px] text-text-secondary font-mono uppercase">{coin.symbol}</p>
-                                        </div>
-                                      </div>
-                                      <div className="text-right">
-                                        <p className="text-xs font-mono text-text-primary tabular-nums">
-                                          {formatPrice(coin.price)}
-                                        </p>
-                                        <span className={`text-[10px] font-mono font-medium ${coin.change24h >= 0 ? 'text-status-success' : 'text-status-danger'
-                                          }`}>
-                                          {coin.change24h >= 0 ? '▲' : '▼'} {Math.abs(coin.change24h).toFixed(2)}%
-                                        </span>
-                                      </div>
-                                    </div>
-                                  );
-                                })
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })()}
-
+                    <div className="flex flex-wrap items-end gap-x-2.5 gap-y-1 mt-2.5">
+                      <p className="text-[30px] font-semibold tracking-[-0.03em] leading-none text-text-primary tabular-nums">{formatPrice(activeCoin?.price)}</p>
+                      <span className="flex items-center gap-1.5 pb-0.5">
+                        <StatusBadge tone={cryptoIsUp ? 'success' : 'critical'} progress={null} size="sm">{cryptoChangeText}</StatusBadge>
+                        <span className="text-[12.5px] text-text-muted">24h</span>
+                      </span>
                     </div>
+                  </section>
+
+                  {/* In-page section switcher */}
+                  <div className="segmented segmented-full [&>button]:h-10" role="group" aria-label="Crypto sections" id="crypto-segmented-control-mobile">
+                    {([['overview', 'Overview'], ['chart', 'Chart'], ['leaderboard', 'Markets']] as const).map(([tab, label]) => (
+                      <button key={tab} type="button" role="tab" onClick={() => setCryptoSubTab(tab)} aria-pressed={cryptoSubTab === tab} aria-selected={cryptoSubTab === tab}>
+                        {label}
+                      </button>
+                    ))}
                   </div>
+
+                  {/* VIEW: OVERVIEW */}
+                  {cryptoSubTab === 'overview' && (
+                    <div className="flex flex-col gap-3" id="crypto-tab-overview-mobile">
+                      <dl className="card grid grid-cols-2 overflow-hidden [&>div]:border-border-hairline [&>div:nth-child(even)]:border-l [&>div:nth-child(n+3)]:border-t">
+                        {cryptoStats.map(s => (
+                          <div key={s.label} className="px-4 py-3 min-w-0">
+                            <dt className="text-[12.5px] text-text-muted">{s.label}</dt>
+                            <dd className="text-[16px] font-semibold text-text-primary tabular-nums mt-0.5 truncate">{s.value}</dd>
+                          </div>
+                        ))}
+                      </dl>
+
+                      <section className="card card-pad">
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <h3 className="card-title">Top movers</h3>
+                          <button type="button" onClick={() => setCryptoSubTab('leaderboard')} className="btn btn-ghost btn-sm -mr-2">
+                            All markets
+                            <PhosphorIcon name="chevron-right" size={14} />
+                          </button>
+                        </div>
+                        <div className="flex flex-col -mx-2">
+                          {otherCoins.map(coin => renderCryptoRow(coin))}
+                        </div>
+                      </section>
+                    </div>
+                  )}
+
+                  {/* VIEW: CHART */}
+                  {cryptoSubTab === 'chart' && (
+                    <section className="card card-pad flex flex-col gap-3" id="crypto-tab-chart-mobile">
+                      {renderCryptoTimeframes(true)}
+                      <PriceTrendChart
+                        data={sparkline}
+                        name={activeCoin?.name || 'Ticker'}
+                        height="h-[180px]"
+                        timeframe={chartTimeframe}
+                      />
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="rounded-lg bg-surface-2 px-3 py-2.5 min-w-0">
+                          <p className="stat-label">High</p>
+                          <p className="text-[15px] font-semibold text-text-primary tabular-nums truncate mt-0.5">{formatPrice(highestPrice)}</p>
+                        </div>
+                        <div className="rounded-lg bg-surface-2 px-3 py-2.5 min-w-0">
+                          <p className="stat-label">Low</p>
+                          <p className="text-[15px] font-semibold text-text-primary tabular-nums truncate mt-0.5">{formatPrice(lowestPrice)}</p>
+                        </div>
+                      </div>
+                      <button type="button" onClick={() => handleExportCSV('crypto')} className="btn btn-secondary w-full h-10">
+                        <PhosphorIcon name="download" size={15} />
+                        Export CSV
+                      </button>
+                    </section>
+                  )}
+
+                  {/* VIEW: MARKETS */}
+                  {cryptoSubTab === 'leaderboard' && (
+                    <section className="card card-pad flex flex-col gap-3" id="crypto-tab-leaderboard-mobile">
+                      <div className="flex items-center justify-between gap-2">
+                        <h3 className="card-title">Markets</h3>
+                        <StatusBadge tone="neutral" progress={null}>{cryptoAll.length} coins</StatusBadge>
+                      </div>
+                      {cryptoSearchField}
+                      {renderCryptoSort(true)}
+                      <div className="flex flex-col -mx-2">
+                        {cryptoSorted.length === 0 ? cryptoEmpty : cryptoMobileList.map(coin => renderCryptoRow(coin))}
+                      </div>
+                      {cryptoSorted.length > cryptoListLimit && (
+                        <button type="button" onClick={() => setTabletLeaderboardExpanded(prev => !prev)} className="btn btn-secondary w-full h-10">
+                          {tabletLeaderboardExpanded ? 'Show fewer' : `Show all ${cryptoSorted.length}`}
+                        </button>
+                      )}
+                    </section>
+                  )}
                 </div>
 
                 {/* ==================== TABLET & DESKTOP LAYOUT (>= 768px) ==================== */}
-                <div className="hidden md:flex flex-col lg:grid lg:grid-cols-12 gap-6 w-full">
-                  {/* Left Column (Hero, Stats, Chart) - Takes 8 cols on desktop, full width on tablet */}
-                  <div className="flex flex-col gap-6 lg:col-span-8 w-full">
+                <div className="hidden md:grid grid-cols-1 lg:grid-cols-12 gap-6 items-start w-full">
 
-                    {/* Header Card */}
-                    <div className="bg-surface-1 border border-border-hairline rounded-3xl p-6 shadow-xs flex flex-col gap-5">
-                      {/* Coin Identity Header */}
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3.5">
-                          <div className="w-10 h-10 rounded-full overflow-hidden flex items-center justify-center bg-surface-2 shrink-0">
-                            <CryptoLogo symbol={activeCoin?.symbol || ''} size={10} />
+                  {/* Main column: hero + chart */}
+                  <div className="lg:col-span-8 flex flex-col gap-6 min-w-0">
+
+                    {/* Selected coin hero */}
+                    <section className="card card-pad" aria-label="Selected coin">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-11 h-11 rounded-full overflow-hidden flex items-center justify-center bg-surface-2 shrink-0">
+                            <CryptoLogo symbol={activeCoin?.symbol || ''} size={11} />
                           </div>
-                          <div>
-                            <h2 className="font-sans font-medium text-lg md:text-xl text-text-primary leading-tight">
-                              {activeCoin?.name}
+                          <div className="min-w-0">
+                            <h2 className="text-[17px] font-semibold text-text-primary leading-tight truncate">
+                              {activeCoin?.name} <span className="text-[15px] font-normal text-text-muted">{activeCoin?.symbol?.toUpperCase()}</span>
                             </h2>
-                            <p className="text-xs md:text-[13px] text-text-secondary font-normal mt-0.5">
-                              Global rank #{activeCoin?.rank} · {activeCoin?.tags?.join(' · ')}
-                            </p>
+                            <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                              <StatusBadge tone="neutral" progress={null} size="xs">Rank #{activeCoin?.rank}</StatusBadge>
+                              {activeCoin?.tags?.map(tag => (
+                                <React.Fragment key={tag}><StatusBadge tone="info" progress={null} size="xs">{tag}</StatusBadge></React.Fragment>
+                              ))}
+                            </div>
                           </div>
                         </div>
-                      </div>
-
-                      {/* Price Hero Row */}
-                      <div className="flex items-baseline gap-2.5">
-                        <span className="font-sans font-medium text-[26px] md:text-[32px] tracking-tight text-text-primary tabular-nums">
-                          {formatPrice(activeCoin?.price)}
-                        </span>
-                        <span className={`font-sans font-normal text-sm md:text-base inline-flex items-center gap-1 ${(activeCoin?.change24h || 0) >= 0 ? 'text-status-success' : 'text-status-danger'
-                          }`}>
-                          {(activeCoin?.change24h || 0) >= 0 ? '▲' : '▼'} {Math.abs(activeCoin?.change24h || 0).toFixed(2)}%
-                        </span>
-                      </div>
-
-                      {/* Non-scrolling Grid of 4 Stats */}
-                      <div className="grid grid-cols-4 gap-4 mt-1">
-                        {/* 24h Change */}
-                        <div className="bg-surface-2 p-4 rounded-xl flex flex-col justify-between h-[82px]">
-                          <p className="text-[11px] font-sans font-medium text-text-secondary leading-none">24h change</p>
-                          <p className={`font-sans font-medium text-sm tabular-nums mt-1 ${(activeCoin?.change24h || 0) >= 0 ? 'text-status-success' : 'text-status-danger'}`}>
-                            {(activeCoin?.change24h || 0) >= 0 ? '+' : ''}{(activeCoin?.change24h || 0).toFixed(2)}%
-                          </p>
-                        </div>
-
-                        {/* High Today */}
-                        <div className="bg-surface-2 p-4 rounded-xl flex flex-col justify-between h-[82px]">
-                          <p className="text-[11px] font-sans font-medium text-text-secondary leading-none">High today</p>
-                          <p className="font-sans font-medium text-sm text-text-primary tabular-nums mt-1 truncate">
-                            {formatPrice(highestPrice)}
-                          </p>
-                        </div>
-
-                        {/* Low Today */}
-                        <div className="bg-surface-2 p-4 rounded-xl flex flex-col justify-between h-[82px]">
-                          <p className="text-[11px] font-sans font-medium text-text-secondary leading-none">Low today</p>
-                          <p className="font-sans font-medium text-sm text-text-primary tabular-nums mt-1 truncate">
-                            {formatPrice(lowestPrice)}
-                          </p>
-                        </div>
-
-                        {/* Market Cap */}
-                        <div className="bg-surface-2 p-4 rounded-xl flex flex-col justify-between h-[82px]">
-                          <p className="text-[11px] font-sans font-medium text-text-secondary leading-none">Market cap</p>
-                          <p className="font-sans font-medium text-sm text-text-primary tabular-nums mt-1 truncate">
-                            {formatLargeNumber(activeCoin?.marketCap || 0)}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Movement sentence */}
-                      <p className="text-[13px] text-text-secondary leading-relaxed font-normal max-w-3xl mt-1">
-                        {movementSentence}
-                      </p>
-                    </div>
-
-                    {/* Chart Card */}
-                    <div className="bg-surface-1 border border-border-hairline rounded-3xl p-6 shadow-xs flex flex-col gap-4">
-                      {/* Chart Header */}
-                      <div className="flex justify-between items-center">
-                        <h3 className="text-xs font-sans font-medium text-text-secondary uppercase tracking-wider">
-                          Price history & trend
-                        </h3>
-                        {/* Timeframe Selector */}
-                        <div className="flex gap-1.5 flex-nowrap overflow-x-auto scrollbar-none">
-                          {(['24h', '7d', '30d', '1y'] as const).map(tf => {
-                            const label = tf === '24h' ? '1D' : tf === '30d' ? '1M' : tf.toUpperCase();
-                            return (
-                              <button
-                                key={tf}
-                                onClick={() => setChartTimeframe(tf)}
-                                className={`text-[11px] font-mono px-3.5 py-2 min-h-[36px] flex items-center justify-center rounded-full cursor-pointer transition-colors shrink-0 ${chartTimeframe === tf
-                                  ? 'bg-text-primary text-surface-1 font-semibold'
-                                  : 'bg-surface-2 text-text-secondary hover:text-text-primary'
-                                  }`}
-                              >
-                                {label}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      {/* Chart Area */}
-                      <div className="bg-surface-2 rounded-2xl p-4 flex items-center justify-center">
-                        <PriceTrendChart
-                          data={sparkline}
-                          name={activeCoin?.name || 'Ticker'}
-                          height="h-[200px] lg:h-[280px]"
-                          timeframe={chartTimeframe}
-                        />
-                      </div>
-
-                      {/* Info and Export row */}
-                      <div className="flex justify-between items-center mt-1 gap-2">
-                        <div className="flex gap-6 text-xs font-medium text-text-primary">
-                          <div className="flex items-center">
-                            <span className="text-text-secondary text-[11px] uppercase mr-1.5">High</span>
-                            <span className="tabular-nums font-medium block sm:hidden">{highestPrice >= 1000 ? `$${(highestPrice / 1000).toFixed(1)}k` : formatPrice(highestPrice)}</span>
-                            <span className="tabular-nums font-medium hidden sm:block">{formatPrice(highestPrice)}</span>
-                          </div>
-                          <div className="flex items-center">
-                            <span className="text-text-secondary text-[11px] uppercase mr-1.5">Low</span>
-                            <span className="tabular-nums font-medium block sm:hidden">{lowestPrice >= 1000 ? `$${(lowestPrice / 1000).toFixed(1)}k` : formatPrice(lowestPrice)}</span>
-                            <span className="tabular-nums font-medium hidden sm:block">{formatPrice(lowestPrice)}</span>
-                          </div>
-                        </div>
-
-                        {/* Export Button */}
-                        <button
-                          onClick={() => handleExportCSV('crypto')}
-                          className="flex items-center gap-1.5 px-4 py-2.5 rounded-full border border-border-hairline hover:border-status-accent font-sans font-medium text-xs transition-colors cursor-pointer text-text-primary bg-transparent"
-                        >
-                          <PhosphorIcon name="download" className="text-sm" />
+                        <button type="button" onClick={() => handleExportCSV('crypto')} className="btn btn-secondary shrink-0">
+                          <PhosphorIcon name="download" size={15} />
                           Export CSV
                         </button>
                       </div>
-                    </div>
 
-                    {/* TABLET ONLY: Inline Leaderboard (hidden on desktop) */}
-                    <div className="block lg:hidden bg-surface-1 border border-border-hairline rounded-3xl p-6 shadow-xs flex flex-col gap-4">
-                      <div className="flex flex-col gap-2 border-b border-border-hairline pb-2.5">
-                        {/* Row 1: Header and Search Trigger */}
-                        <div className="flex justify-between items-center">
-                          <h3 className="font-sans font-medium text-xs text-text-secondary uppercase tracking-wider">Watchlist</h3>
-                          <button
-                            onClick={() => {
-                              setLeaderboardSearchOpen(!leaderboardSearchOpen);
-                              if (leaderboardSearchOpen) setCryptoSearch('');
-                            }}
-                            className={`p-1.5 rounded-full cursor-pointer transition-colors ${leaderboardSearchOpen ? 'text-status-accent bg-surface-2' : 'text-text-secondary hover:text-text-primary bg-surface-2/40'
-                              }`}
-                            title="Search currencies"
-                          >
-                            <PhosphorIcon name={leaderboardSearchOpen ? "x" : "search"} size={13} />
-                          </button>
-                        </div>
+                      <div className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-2">
+                        <span className="stat-hero">{formatPrice(activeCoin?.price)}</span>
+                        <StatusBadge tone={cryptoIsUp ? 'success' : 'critical'} progress={null} size="md">{cryptoChangeText}</StatusBadge>
+                        <span className="text-[13px] text-text-muted">past 24h</span>
+                      </div>
+                      <p className="card-subtitle mt-2">{movementSentence}</p>
 
-                        {/* Row 2: Search Input (Full Width on tablet when open) */}
-                        {leaderboardSearchOpen && (
-                          <div className="relative w-full animate-fade-in">
-                            <input
-                              type="text"
-                              placeholder="Search coins..."
-                              value={cryptoSearch}
-                              onChange={(e) => setCryptoSearch(e.target.value)}
-                              className="w-full pl-8 pr-7 py-1.5 rounded-full bg-surface-2 border border-border-hairline font-sans text-xs focus:outline-none focus:border-border-strong text-text-primary"
-                              autoFocus
-                            />
-                            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted">
-                              <PhosphorIcon name="search" size={12} />
-                            </span>
-                            {cryptoSearch && (
-                              <button
-                                onClick={() => setCryptoSearch('')}
-                                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary cursor-pointer"
-                              >
-                                <PhosphorIcon name="x" size={12} />
-                              </button>
-                            )}
+                      <dl className="mt-5 pt-4 border-t border-border-hairline grid grid-cols-2 md:grid-cols-4 gap-4">
+                        {cryptoStats.map(s => (
+                          <div key={s.label} className="min-w-0">
+                            <dt className="stat-label">{s.label}</dt>
+                            <dd className="stat-value mt-1 truncate">{s.value}</dd>
                           </div>
-                        )}
+                        ))}
+                      </dl>
+                    </section>
 
-                        {/* Row 3: Sort Controls */}
-                        <div className="flex items-center justify-between pt-1">
-                          <span className="text-[10px] text-text-muted">Sort:</span>
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              onClick={() => {
-                                if (cryptoSortField === 'rank') {
-                                  setCryptoSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
-                                } else {
-                                  setCryptoSortField('rank');
-                                  setCryptoSortDirection('asc');
-                                }
-                              }}
-                              className={`text-[9px] font-mono px-2 py-0.5 rounded transition-all cursor-pointer ${cryptoSortField === 'rank' ? 'bg-surface-2 text-text-primary font-bold border border-border-hairline/40' : 'text-text-secondary hover:text-text-primary'
-                                }`}
-                            >
-                              Rank {cryptoSortField === 'rank' && (cryptoSortDirection === 'asc' ? '↑' : '↓')}
-                            </button>
-                            <button
-                              onClick={() => {
-                                if (cryptoSortField === 'price') {
-                                  setCryptoSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
-                                } else {
-                                  setCryptoSortField('price');
-                                  setCryptoSortDirection('desc');
-                                }
-                              }}
-                              className={`text-[9px] font-mono px-2 py-0.5 rounded transition-all cursor-pointer ${cryptoSortField === 'price' ? 'bg-surface-2 text-text-primary font-bold border border-border-hairline/40' : 'text-text-secondary hover:text-text-primary'
-                                }`}
-                            >
-                              Price {cryptoSortField === 'price' && (cryptoSortDirection === 'asc' ? '↑' : '↓')}
-                            </button>
-                            <button
-                              onClick={() => {
-                                if (cryptoSortField === 'change') {
-                                  setCryptoSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
-                                } else {
-                                  setCryptoSortField('change');
-                                  setCryptoSortDirection('desc');
-                                }
-                              }}
-                              className={`text-[9px] font-mono px-2 py-0.5 rounded transition-all cursor-pointer ${cryptoSortField === 'change' ? 'bg-surface-2 text-text-primary font-bold border border-border-hairline/40' : 'text-text-secondary hover:text-text-primary'
-                                }`}
-                            >
-                              24h change {cryptoSortField === 'change' && (cryptoSortDirection === 'asc' ? '↑' : '↓')}
-                            </button>
-                          </div>
+                    {/* Price chart */}
+                    <section className="card card-pad">
+                      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                        <div>
+                          <h3 className="card-title">Price history</h3>
+                          <p className="card-subtitle">{activeCoin?.name} in {defaultCurrency}</p>
                         </div>
+                        {renderCryptoTimeframes(false)}
                       </div>
-
-                      {/* Grid list of coins (top 5 by default, expand to all if tabletLeaderboardExpanded) */}
-                      <div className="flex flex-col divide-y divide-border-hairline/40">
-                        {(() => {
-                          const filteredList = (data.crypto || []).filter(c =>
-                            c.name.toLowerCase().includes(cryptoSearch.toLowerCase()) ||
-                            c.symbol.toLowerCase().includes(cryptoSearch.toLowerCase())
-                          );
-
-                          const sortedCrypto = [...filteredList].sort((a, b) => {
-                            let valA: number;
-                            let valB: number;
-                            if (cryptoSortField === 'price') {
-                              valA = a.price;
-                              valB = b.price;
-                            } else if (cryptoSortField === 'change') {
-                              valA = a.change24h;
-                              valB = b.change24h;
-                            } else {
-                              valA = a.rank;
-                              valB = b.rank;
-                            }
-                            return cryptoSortDirection === 'asc' ? valA - valB : valB - valA;
-                          });
-
-                          const displayedCrypto = tabletLeaderboardExpanded ? sortedCrypto : sortedCrypto.slice(0, 5);
-
-                          if (displayedCrypto.length === 0) {
-                            return (
-                              <div className="py-8 text-center text-xs text-text-secondary">
-                                No coins match "{cryptoSearch}"
-                              </div>
-                            );
-                          }
-
-                          return displayedCrypto.map((coin) => {
-                            const isSelected = coin.id === selectedCoinId;
-                            return (
-                              <div
-                                key={coin.id}
-                                onClick={() => setSelectedCoinId(coin.id)}
-                                className={`py-2.5 px-1.5 transition-all cursor-pointer flex items-center justify-between group ${isSelected ? 'bg-surface-2/40 font-medium rounded-lg' : 'hover:bg-surface-2/20'
-                                  }`}
-                              >
-                                <div className="flex items-center gap-3">
-                                  <span className="font-mono text-xs text-text-secondary min-w-[18px]">#{coin.rank}</span>
-                                  <div className="w-7 h-7 rounded-full overflow-hidden flex items-center justify-center bg-surface-2">
-                                    <CryptoLogo symbol={coin.symbol} size={7} />
-                                  </div>
-                                  <div>
-                                    <p className="text-sm text-text-primary">{coin.name}</p>
-                                    <p className="text-[10px] text-text-secondary font-mono uppercase">{coin.symbol}</p>
-                                  </div>
-                                </div>
-                                <div className="text-right">
-                                  <p className="text-sm font-mono text-text-primary tabular-nums">
-                                    {formatPrice(coin.price)}
-                                  </p>
-                                  <span className={`text-xs font-mono font-medium ${coin.change24h >= 0 ? 'text-status-success' : 'text-status-danger'
-                                    }`}>
-                                    {coin.change24h >= 0 ? '▲' : '▼'} {Math.abs(coin.change24h).toFixed(2)}%
-                                  </span>
-                                </div>
-                              </div>
-                            );
-                          });
-                        })()}
-                      </div>
-
-                      {/* Expand / Collapse toggle */}
-                      <div className="text-center pt-2">
-                        <button
-                          onClick={() => setTabletLeaderboardExpanded(prev => !prev)}
-                          className="text-status-accent hover:underline text-[12px] font-medium cursor-pointer transition-colors"
-                        >
-                          {tabletLeaderboardExpanded ? 'Show top 5 only' : 'View full leaderboard'}
-                        </button>
-                      </div>
-                    </div>
-
+                      <PriceTrendChart
+                        data={sparkline}
+                        name={activeCoin?.name || 'Ticker'}
+                        height="h-[240px] lg:h-[300px]"
+                        timeframe={chartTimeframe}
+                      />
+                    </section>
                   </div>
 
-                  {/* Right Column (Leaderboard sidebar) - DESKTOP ONLY (hidden on mobile/tablet) */}
-                  <div className="hidden lg:block lg:col-span-4 h-full">
-                    <div className="bg-surface-1 border border-border-hairline rounded-3xl p-6 shadow-xs flex flex-col gap-4 sticky top-4 h-[calc(100vh-140px)] min-h-[560px]">
-
-                      {/* Watchlist Header and Sort Controls */}
-                      <div className="flex flex-col gap-3 pb-3 border-b border-border-hairline">
-                        <div className="flex items-center justify-between gap-2">
-                          {leaderboardSearchOpen ? (
-                            <div className="relative flex-1 animate-fade-in">
-                              <input
-                                type="text"
-                                placeholder="Search coins..."
-                                value={cryptoSearch}
-                                onChange={(e) => setCryptoSearch(e.target.value)}
-                                className="w-full pl-8 pr-7 py-1 rounded-full bg-surface-2 border border-border-hairline font-sans text-xs focus:outline-none focus:border-border-strong text-text-primary"
-                                autoFocus
-                              />
-                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted">
-                                <PhosphorIcon name="search" size={12} />
-                              </span>
-                              {cryptoSearch && (
-                                <button
-                                  onClick={() => setCryptoSearch('')}
-                                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary cursor-pointer"
-                                >
-                                  <PhosphorIcon name="x" size={12} />
-                                </button>
-                              )}
-                            </div>
-                          ) : (
-                            <h3 className="font-sans font-medium text-xs text-text-secondary uppercase tracking-wider">
-                              Watchlist
-                            </h3>
-                          )}
-                          <button
-                            onClick={() => {
-                              setLeaderboardSearchOpen(!leaderboardSearchOpen);
-                              if (leaderboardSearchOpen) setCryptoSearch('');
-                            }}
-                            className={`p-1.5 rounded-full cursor-pointer transition-colors ${leaderboardSearchOpen ? 'text-status-accent bg-surface-2' : 'text-text-secondary hover:text-text-primary bg-surface-2/40'
-                              }`}
-                            title="Search currencies"
-                          >
-                            <PhosphorIcon name={leaderboardSearchOpen ? "x" : "search"} size={13} />
-                          </button>
-                        </div>
-
-                        <div className="flex items-center gap-1.5 justify-between">
-                          <span className="text-[10px] text-text-muted">Sort currencies:</span>
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => {
-                                if (cryptoSortField === 'rank') {
-                                  setCryptoSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
-                                } else {
-                                  setCryptoSortField('rank');
-                                  setCryptoSortDirection('asc');
-                                }
-                              }}
-                              className={`text-[9px] font-mono px-2 py-0.5 rounded transition-all cursor-pointer ${cryptoSortField === 'rank' ? 'bg-surface-2 text-text-primary font-bold border border-border-hairline/40' : 'text-text-secondary hover:text-text-primary'
-                                }`}
-                            >
-                              Rank {cryptoSortField === 'rank' && (cryptoSortDirection === 'asc' ? '↑' : '↓')}
-                            </button>
-                            <button
-                              onClick={() => {
-                                if (cryptoSortField === 'price') {
-                                  setCryptoSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
-                                } else {
-                                  setCryptoSortField('price');
-                                  setCryptoSortDirection('desc');
-                                }
-                              }}
-                              className={`text-[9px] font-mono px-2 py-0.5 rounded transition-all cursor-pointer ${cryptoSortField === 'price' ? 'bg-surface-2 text-text-primary font-bold border border-border-hairline/40' : 'text-text-secondary hover:text-text-primary'
-                                }`}
-                            >
-                              Price {cryptoSortField === 'price' && (cryptoSortDirection === 'asc' ? '↑' : '↓')}
-                            </button>
-                            <button
-                              onClick={() => {
-                                if (cryptoSortField === 'change') {
-                                  setCryptoSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
-                                } else {
-                                  setCryptoSortField('change');
-                                  setCryptoSortDirection('desc');
-                                }
-                              }}
-                              className={`text-[9px] font-mono px-2 py-0.5 rounded transition-all cursor-pointer ${cryptoSortField === 'change' ? 'bg-surface-2 text-text-primary font-bold border border-border-hairline/40' : 'text-text-secondary hover:text-text-primary'
-                                }`}
-                            >
-                              24h {cryptoSortField === 'change' && (cryptoSortDirection === 'asc' ? '↑' : '↓')}
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Scrollable list of currencies */}
-                      <div className="flex-1 overflow-y-auto divide-y divide-border-hairline/40 pr-1">
-                        {(() => {
-                          const filteredList = (data.crypto || []).filter(c =>
-                            c.name.toLowerCase().includes(cryptoSearch.toLowerCase()) ||
-                            c.symbol.toLowerCase().includes(cryptoSearch.toLowerCase())
-                          );
-
-                          const sortedCrypto = [...filteredList].sort((a, b) => {
-                            let valA: number;
-                            let valB: number;
-                            if (cryptoSortField === 'price') {
-                              valA = a.price;
-                              valB = b.price;
-                            } else if (cryptoSortField === 'change') {
-                              valA = a.change24h;
-                              valB = b.change24h;
-                            } else {
-                              valA = a.rank;
-                              valB = b.rank;
-                            }
-                            return cryptoSortDirection === 'asc' ? valA - valB : valB - valA;
-                          });
-
-                          if (sortedCrypto.length === 0) {
-                            return (
-                              <div className="py-8 text-center text-xs text-text-secondary">
-                                No coins match "{cryptoSearch}"
-                              </div>
-                            );
-                          }
-
-                          return sortedCrypto.map((coin) => {
-                            const isSelected = coin.id === selectedCoinId;
-                            return (
-                              <div
-                                key={coin.id}
-                                onClick={() => setSelectedCoinId(coin.id)}
-                                className={`py-3 px-2 transition-all cursor-pointer flex items-center justify-between group ${isSelected ? 'bg-surface-2/40 font-medium rounded-lg' : 'hover:bg-surface-2/20'
-                                  }`}
-                              >
-                                <div className="flex items-center gap-2.5">
-                                  <span className="font-mono text-xs text-text-secondary min-w-[16px]">#{coin.rank}</span>
-                                  <div className="w-7 h-7 rounded-full overflow-hidden flex items-center justify-center bg-surface-2">
-                                    <CryptoLogo symbol={coin.symbol} size={7} />
-                                  </div>
-                                  <div>
-                                    <p className="text-xs text-text-primary truncate">{coin.name}</p>
-                                    <p className="text-[10px] text-text-secondary font-mono uppercase">{coin.symbol}</p>
-                                  </div>
-                                </div>
-                                <div className="text-right">
-                                  <p className="text-xs font-mono text-text-primary tabular-nums">
-                                    {formatPrice(coin.price)}
-                                  </p>
-                                  <span className={`text-[10px] font-mono font-medium ${coin.change24h >= 0 ? 'text-status-success' : 'text-status-danger'
-                                    }`}>
-                                    {coin.change24h >= 0 ? '▲' : '▼'} {Math.abs(coin.change24h).toFixed(2)}%
-                                  </span>
-                                </div>
-                              </div>
-                            );
-                          });
-                        })()}
-                      </div>
-
+                  {/* Markets list: sidebar on desktop, full-width card (top 5 + expand) on tablet */}
+                  <aside className="lg:col-span-4 lg:sticky lg:top-4 card card-pad flex flex-col gap-3 lg:max-h-[calc(100vh-140px)] lg:min-h-[480px]" aria-label="Markets">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="card-title">Markets</h3>
+                      <StatusBadge tone="neutral" progress={null}>{cryptoAll.length} coins</StatusBadge>
                     </div>
-                  </div>
+                    {cryptoSearchField}
+                    {renderCryptoSort(false)}
+                    <div className="flex flex-col -mx-2 px-0.5 lg:flex-1 lg:min-h-0 lg:overflow-y-auto">
+                      {cryptoSorted.length === 0
+                        ? cryptoEmpty
+                        : cryptoSorted.map((coin, idx) => renderCryptoRow(coin, !tabletLeaderboardExpanded && idx >= cryptoListLimit ? 'hidden lg:flex' : ''))}
+                    </div>
+                    {cryptoSorted.length > cryptoListLimit && (
+                      <button type="button" onClick={() => setTabletLeaderboardExpanded(prev => !prev)} className="btn btn-secondary w-full lg:hidden">
+                        {tabletLeaderboardExpanded ? 'Show fewer' : `Show all ${cryptoSorted.length}`}
+                      </button>
+                    )}
+                  </aside>
 
                 </div>
 
@@ -3203,186 +3110,226 @@ export default function App() {
           })()}
 
           {/* ==================== TAB 3: WEATHER DETAILS ==================== */}
-          {activeTab === 'weather' && (
-            <>
-              {/* MOBILE ONLY VIEW (viewport <= 480px) */}
-              <div className="block min-[481px]:hidden space-y-4 animate-slide-up" id="weather-tab-mobile">
-                {/* Detail Card */}
-                <div className="border border-border-hairline border-t-2 border-t-status-info rounded-3xl bg-surface-1 p-5 shadow-xs flex flex-col justify-between" id="weather-mobile-detail-card">
-                  <div>
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <span className="font-sans text-[10px] font-semibold text-status-info uppercase tracking-wider">Weather Forecast</span>
-                        <h2 className="font-sans font-medium text-xl tracking-tight text-text-primary mt-1">
-                          {activeWeather?.city}, <span className="font-normal text-text-secondary">{activeWeather?.country}</span>
-                        </h2>
-                      </div>
+          {activeTab === 'weather' && (() => {
+            const weatherList = data.weather || [];
+            const weatherToday = activeWeather?.forecast?.[0];
+            const weatherDeg = (c: number) => tempUnit === 'F' ? `${Math.round((c * 9) / 5 + 32)}°` : `${Math.round(c)}°`;
+            const weatherSelect = (city: string) => {
+              setSelectedCity(city);
+              setSelectedCountryCode(MONITORED_CITIES.find(c => c.city === city)?.code || 'US');
+            };
+            const weatherFiltered = weatherList.filter(w =>
+              w.city.toLowerCase().includes(weatherSearch.toLowerCase()) ||
+              w.country.toLowerCase().includes(weatherSearch.toLowerCase())
+            );
+            const weatherPct = (n: number | undefined) => Math.min(100, Math.max(0, ((n || 0) / 30) * 100));
 
-                      {/* Compact Location Switcher Button/Chip */}
+            if (!activeWeather) {
+              return (
+                <div className="card card-pad py-12 flex flex-col items-center text-center animate-slide-up" id="weather-empty-state">
+                  <span className="w-12 h-12 rounded-2xl bg-surface-2 flex items-center justify-center text-text-muted">
+                    <PhosphorIcon name="cloud-sun" size={24} className="" />
+                  </span>
+                  <p className="card-title mt-3">Weather data is loading</p>
+                  <p className="card-subtitle max-w-xs">Current conditions and forecasts for monitored cities will appear here shortly.</p>
+                </div>
+              );
+            }
+
+            const weatherStatTiles = [
+              { label: 'Humidity', value: `${activeWeather.humidity}%`, pct: activeWeather.humidity, bar: 'bg-status-info' },
+              { label: 'Wind', value: `${activeWeather.windSpeed} km/h`, pct: null as number | null, bar: '' },
+              { label: 'Rainy days / month', value: `${activeWeather.rainfallDays} ${activeWeather.rainfallDays === 1 ? 'day' : 'days'}`, pct: weatherPct(activeWeather.rainfallDays), bar: 'bg-status-info' },
+              { label: 'Volatile days / month', value: `${activeWeather.volatilityDays} ${activeWeather.volatilityDays === 1 ? 'day' : 'days'}`, pct: weatherPct(activeWeather.volatilityDays), bar: 'bg-status-indigo' },
+            ];
+
+            return (
+            <>
+              {/* ===== MOBILE (< 768px): hero + in-page section switcher ===== */}
+              <div className="md:hidden flex flex-col gap-3 animate-slide-up" id="weather-tab-mobile">
+                {/* Hero: city, temperature, condition — always first screen */}
+                <section className="card card-pad" id="weather-mobile-detail-card">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="eyebrow">Current conditions</p>
+                      <h2 className="text-[17px] font-semibold tracking-tight text-text-primary mt-1 truncate">
+                        {activeWeather.city}<span className="font-normal text-text-secondary">, {activeWeather.country}</span>
+                      </h2>
+                    </div>
+                    <button
+                      onClick={() => setMobileLocationsOpen(true)}
+                      className="btn btn-secondary btn-sm h-10 shrink-0"
+                      id="weather-locations-trigger-mobile"
+                      aria-label={`Change city (${weatherList.length} cities)`}
+                    >
+                      <Compass size={15} />
+                      Change
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 mt-3">
+                    <div className="min-w-0">
+                      <p className="stat-hero text-[44px]">{formatTemp(activeWeather.temp)}</p>
+                      <p className="text-[15px] font-medium text-text-primary mt-1">{activeWeather.condition}</p>
+                      <p className="text-[13px] text-text-secondary mt-0.5">Feels like {formatTemp(activeWeather.feelsLike)}</p>
+                    </div>
+                    <span className="w-16 h-16 rounded-2xl bg-surface-2 flex items-center justify-center shrink-0 [&>svg]:size-9" aria-hidden="true">
+                      {getWeatherIcon(activeWeather.weatherCode)}
+                    </span>
+                  </div>
+
+                  <dl className="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-border-hairline">
+                    <div>
+                      <dt className="text-[12px] text-text-muted">High / Low</dt>
+                      <dd className="text-[15px] font-semibold text-text-primary tabular-nums">
+                        {weatherToday ? `${weatherDeg(weatherToday.tempMax)} / ${weatherDeg(weatherToday.tempMin)}` : '—'}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-[12px] text-text-muted">Humidity</dt>
+                      <dd className="text-[15px] font-semibold text-text-primary tabular-nums">{activeWeather.humidity}%</dd>
+                    </div>
+                    <div>
+                      <dt className="text-[12px] text-text-muted">Wind</dt>
+                      <dd className="text-[15px] font-semibold text-text-primary tabular-nums">{activeWeather.windSpeed} km/h</dd>
+                    </div>
+                  </dl>
+                </section>
+
+                {/* Section switcher */}
+                <div className="segmented segmented-full" role="group" aria-label="Weather sections">
+                  <button aria-pressed={weatherMobileSection === 'now'} onClick={() => setWeatherMobileSection('now')}>Now</button>
+                  <button aria-pressed={weatherMobileSection === 'forecast'} onClick={() => setWeatherMobileSection('forecast')}>7-day</button>
+                  <button aria-pressed={weatherMobileSection === 'cities'} onClick={() => setWeatherMobileSection('cities')}>Cities</button>
+                </div>
+
+                {weatherMobileSection === 'now' && (
+                  <div className="flex flex-col gap-3 animate-fade-in" id="weather-mobile-now">
+                    {/* Next days preview */}
+                    {(activeWeather.forecast || []).length > 1 && (
+                      <section className="card card-pad" id="weather-mobile-next-days">
+                        <div className="flex items-center justify-between">
+                          <h3 className="card-title">Next few days</h3>
+                          <button onClick={() => setWeatherMobileSection('forecast')} className="btn btn-ghost btn-sm h-10 -mr-2">
+                            See 7-day
+                            <PhosphorIcon name="caret-right" size={14} className="" />
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-4 gap-2 mt-2">
+                          {(activeWeather.forecast || []).slice(1, 5).map((day) => (
+                            <div key={day.date} className="rounded-xl bg-surface-2 py-2.5 flex flex-col items-center gap-1">
+                              <span className="text-[12px] font-medium text-text-secondary">{day.date.substring(0, 3)}</span>
+                              {getWeatherIcon(day.weatherCode)}
+                              <span className="text-[13px] font-semibold text-text-primary tabular-nums">
+                                {weatherDeg(day.tempMax)}<span className="font-normal text-text-muted"> {weatherDeg(day.tempMin)}</span>
+                              </span>
+                              {day.alert && <span className="w-1.5 h-1.5 rounded-full bg-status-warning" title={day.alert} />}
+                            </div>
+                          ))}
+                        </div>
+                      </section>
+                    )}
+
+                    {/* Monthly climate */}
+                    <section className="card card-pad" id="weather-mobile-climate-stats">
+                      <h3 className="card-title">Monthly climate</h3>
+                      <div className="grid grid-cols-2 gap-3 mt-3">
+                        {weatherStatTiles.slice(2).map((s) => (
+                          <div key={s.label} className="rounded-xl bg-surface-2 p-3">
+                            <p className="text-[12px] text-text-muted leading-tight">{s.label}</p>
+                            <p className="text-[15px] font-semibold text-text-primary tabular-nums mt-1">{s.value}</p>
+                            <div className="w-full bg-surface-3 h-1 rounded-full overflow-hidden mt-2">
+                              <div className={`${s.bar} h-full rounded-full transition-all`} style={{ width: `${s.pct}%` }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="text-[12px] text-text-muted mt-3 tabular-nums">
+                        {activeWeather.lat?.toFixed(2)}°, {activeWeather.lon?.toFixed(2)}°{activeWeather.timezone ? ` · ${activeWeather.timezone}` : ''}
+                      </p>
                       <button
-                        onClick={() => setMobileLocationsOpen(true)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-2 border border-border-hairline hover:border-border-strong rounded-full text-xs font-medium text-text-primary cursor-pointer transition-colors shrink-0"
-                        id="weather-locations-trigger-mobile"
+                        onClick={() => handleExportCSV('weather')}
+                        className="btn btn-secondary w-full h-10 mt-3"
                       >
-                        <Compass size={12} />
-                        <span className="text-[10px] font-medium">{activeWeather?.city} • 7 regions ▾</span>
+                        <Download size={15} />
+                        Export region CSV
+                      </button>
+                    </section>
+                  </div>
+                )}
+
+                {weatherMobileSection === 'forecast' && (
+                  <div className="animate-fade-in" id="weather-mobile-forecast-container">
+                    <CalendarGrid variant="list" forecast={activeWeather.forecast || []} formatDeg={weatherDeg} />
+                  </div>
+                )}
+
+                {weatherMobileSection === 'cities' && (
+                  <section className="card card-pad animate-fade-in" id="weather-mobile-cities">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <h3 className="card-title">Cities</h3>
+                        <p className="card-subtitle">{weatherList.length} monitored locations</p>
+                      </div>
+                      <button onClick={() => setMobileLocationsOpen(true)} className="btn btn-secondary btn-icon h-10 w-10" aria-label="Search cities">
+                        <MagnifyingGlass size={16} />
                       </button>
                     </div>
-                    <span className="font-sans text-[9px] text-text-muted block mt-1.5">
-                      Lat: {activeWeather?.lat?.toFixed(2)} • Lon: {activeWeather?.lon?.toFixed(2)}
-                    </span>
-                  </div>
-
-                  <div className="flex items-end justify-between mt-6">
-                    <div>
-                      <h3 className="font-sans font-medium text-3xl tracking-tight text-text-primary leading-none tabular-nums">
-                        {formatTemp(activeWeather?.temp)}
-                      </h3>
-                      <p className="text-[10px] text-text-secondary mt-1 font-medium">
-                        Feels like {formatTemp(activeWeather?.feelsLike)}
-                      </p>
-                      <p className="font-sans font-semibold text-[11px] text-status-info mt-1.5">
-                        {activeWeather?.condition} Outlook
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-mono text-[11px] text-text-primary tabular-nums font-semibold">
-                        {activeWeather?.humidity}% Humidity
-                      </p>
-                      <p className="text-[9px] text-text-secondary mt-0.5">
-                        Wind: {activeWeather?.windSpeed} km/h
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Export CSV (Bottom of the mobile detail card) */}
-                  <button
-                    onClick={() => handleExportCSV('weather')}
-                    className="mt-5 flex items-center justify-center gap-1.5 px-4 py-2 border border-border-hairline hover:border-status-accent rounded-full text-xs font-sans font-semibold cursor-pointer w-full text-text-primary bg-surface-2/60 hover:bg-surface-2 transition-all duration-150"
-                  >
-                    <Download className="text-xs" size={12} />
-                    Export Region CSV
-                  </button>
-                </div>
-
-                {/* Inline Climate Stats Tiles (Flat) */}
-                <div className="grid grid-cols-2 gap-3" id="weather-mobile-climate-stats">
-                  <div className="border border-border-hairline rounded-2xl bg-surface-1 p-3.5 flex flex-col justify-between">
-                    <span className="text-[9px] text-text-secondary font-medium uppercase tracking-wider">Rainy Days / Mth</span>
-                    <div className="flex items-baseline justify-between mt-1">
-                      <span className="text-xs font-semibold text-text-primary">{activeWeather?.rainfallDays} days</span>
-                      <span className="text-[9px] text-text-muted font-mono">{((activeWeather?.rainfallDays || 0) / 30 * 100).toFixed(0)}%</span>
-                    </div>
-                    <div className="w-full bg-surface-2 h-1 rounded-full overflow-hidden mt-1.5">
-                      <div className="bg-status-info h-full rounded-full transition-all" style={{ width: `${((activeWeather?.rainfallDays || 0) / 30) * 100}%` }} />
-                    </div>
-                  </div>
-
-                  <div className="border border-border-hairline rounded-2xl bg-surface-1 p-3.5 flex flex-col justify-between">
-                    <span className="text-[9px] text-text-secondary font-medium uppercase tracking-wider">Volatile Days</span>
-                    <div className="flex items-baseline justify-between mt-1">
-                      <span className="text-xs font-semibold text-text-primary">{activeWeather?.volatilityDays} days</span>
-                      <span className="text-[9px] text-text-muted font-mono">{((activeWeather?.volatilityDays || 0) / 30 * 100).toFixed(0)}%</span>
-                    </div>
-                    <div className="w-full bg-surface-2 h-1 rounded-full overflow-hidden mt-1.5">
-                      <div className="bg-status-indigo h-full rounded-full transition-all" style={{ width: `${((activeWeather?.volatilityDays || 0) / 30) * 100}%` }} />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Horizontally-Scrollable 7-Day Forecast */}
-                <div className="border border-border-hairline rounded-3xl bg-surface-1 p-4 shadow-xs" id="weather-mobile-forecast-container">
-                  <div className="flex items-center justify-between mb-3">
-                    <div>
-                      <h3 className="font-sans font-medium text-xs text-text-primary tracking-tight">7-Day Forecast</h3>
-                      <p className="text-[9px] text-text-secondary mt-0.5">Swipe horizontally to view forecast</p>
-                    </div>
-                    <span className="font-mono text-[8px] text-status-warning bg-status-warning-bg border border-status-warning/15 px-1.5 py-0.5 rounded-full flex items-center gap-0.5 font-semibold shrink-0">
-                      <Sun weight="light" className="text-[10px]" size={10} />
-                      Active Outlook
-                    </span>
-                  </div>
-
-                  <div className="flex gap-2.5 overflow-x-auto pb-2 scrollbar-none snap-x snap-mandatory scroll-smooth pr-1">
-                    {activeWeather?.forecast?.map((day, index) => {
-                      const isToday = index === 0;
-                      return (
-                        <div
-                          key={day.date}
-                          className={`flex-shrink-0 w-[96px] flex flex-col justify-between p-3 border rounded-2xl snap-start ${isToday
-                            ? 'bg-status-warning-bg/40 border-status-warning/45 font-medium'
-                            : 'bg-surface-2/40 border-border-hairline'
-                            }`}
-                        >
-                          <div className="flex items-center justify-between shrink-0">
-                            <span className="font-mono text-[9px] uppercase tracking-wider text-text-muted font-semibold">
-                              {day.date.substring(0, 3)}
+                    <div className="flex flex-col gap-0.5 mt-2 -mx-1">
+                      {weatherList.slice(0, 5).map((w) => {
+                        const isSelected = w.city.toLowerCase() === selectedCity.toLowerCase();
+                        return (
+                          <button
+                            key={w.city}
+                            onClick={() => weatherSelect(w.city)}
+                            className="list-row justify-between min-h-12"
+                            aria-selected={isSelected}
+                          >
+                            <span className="min-w-0">
+                              <span className="block text-[14px] font-medium text-text-primary truncate">{w.city}</span>
+                              <span className="block text-[12px] text-text-muted truncate">{w.condition}</span>
                             </span>
-                            {isToday && (
-                              <span className="font-sans text-[7px] bg-text-primary text-surface-1 px-1 py-0.5 rounded font-bold">
-                                NOW
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="my-2 flex flex-col items-center shrink-0">
-                            {getWeatherIcon(day.weatherCode)}
-                            <div className="flex items-baseline gap-1 mt-1.5">
-                              <span className="font-sans font-semibold text-xs text-text-primary tabular-nums">
-                                {day.tempMax}°
-                              </span>
-                              <span className="font-sans text-[9px] text-text-secondary tabular-nums">
-                                {day.tempMin}°
-                              </span>
-                            </div>
-                            <p className="text-[8px] text-text-secondary mt-0.5 text-center line-clamp-1 font-medium">{day.condition}</p>
-                          </div>
-
-                          <div className="mt-auto pt-1 shrink-0">
-                            {day.alert ? (
-                              <div className="flex items-center gap-0.5 px-1 py-0.5 rounded bg-status-danger-bg text-status-danger border border-status-danger/15 text-[7px] font-semibold leading-none">
-                                <WarningCircle className="text-[8px] flex-shrink-0" size={8} />
-                                <span className="truncate">{day.alert}</span>
-                              </div>
-                            ) : (
-                              <div className="h-3 flex items-center justify-center">
-                                <span className="w-1 h-1 rounded-full bg-border-strong/30" />
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
+                            <span className="text-[15px] font-semibold text-text-primary tabular-nums shrink-0">{formatTemp(w.temp)}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {weatherList.length > 5 && (
+                      <button onClick={() => setMobileLocationsOpen(true)} className="btn btn-ghost w-full h-10 mt-1">
+                        Show all {weatherList.length} cities
+                      </button>
+                    )}
+                  </section>
+                )}
               </div>
 
-              {/* DESKTOP & TABLET VIEW (viewport > 480px) */}
-              <div className="hidden min-[481px]:grid grid-cols-1 lg:grid-cols-12 gap-6 animate-slide-up" id="weather-tab-view">
+              {/* ===== TABLET & DESKTOP (>= 768px) ===== */}
+              <div className="hidden md:grid grid-cols-12 gap-6 animate-slide-up" id="weather-tab-view">
 
-                {/* Left Column (City selector list) — Span 3 — No borders, list style */}
-                <div className="lg:col-span-3 p-1 flex flex-col gap-4">
-                  <div className="flex items-center justify-between border-b border-border-hairline pb-3 min-h-[38px]">
+                {/* Locations list */}
+                <aside className="col-span-4 lg:col-span-3 card card-pad flex flex-col gap-2 self-start" aria-label="Locations">
+                  <div className="flex items-center justify-between gap-2 min-h-9">
                     {weatherSearchDesktopOpen ? (
                       <div className="flex items-center gap-2 w-full animate-fade-in">
                         <div className="relative flex-1">
                           <input
                             type="text"
-                            placeholder="Search locations..."
+                            placeholder="Search locations"
                             value={weatherSearch}
                             onChange={(e) => setWeatherSearch(e.target.value)}
-                            className="w-full pl-7 pr-6 py-1 rounded-lg bg-surface-2 border border-border-hairline font-sans text-[11px] focus:outline-none focus:border-border-strong text-text-primary"
+                            className="w-full h-9 pl-8 pr-7 rounded-lg bg-surface-2 border border-border-hairline text-[14px] focus:outline-none focus:border-border-strong text-text-primary"
                             autoFocus
                           />
                           <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted">
-                            <MagnifyingGlass size={11} />
+                            <MagnifyingGlass size={14} />
                           </span>
                           {weatherSearch && (
                             <button
                               onClick={() => setWeatherSearch('')}
                               className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary cursor-pointer p-0.5"
+                              aria-label="Clear search"
                             >
-                              <X size={10} />
+                              <X size={12} />
                             </button>
                           )}
                         </div>
@@ -3391,162 +3338,123 @@ export default function App() {
                             setWeatherSearchDesktopOpen(false);
                             setWeatherSearch('');
                           }}
-                          className="text-[10px] text-text-secondary hover:text-text-primary font-sans font-medium px-1 cursor-pointer shrink-0"
+                          className="btn btn-ghost btn-sm shrink-0"
                         >
                           Cancel
                         </button>
                       </div>
                     ) : (
                       <>
-                        <h3 className="font-sans font-semibold text-xs text-text-secondary">Locations</h3>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => setWeatherSearchDesktopOpen(true)}
-                            className="p-1 rounded-md hover:bg-surface-2 text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
-                            title="Search locations"
-                            id="weather-search-btn-desktop"
-                          >
-                            <MagnifyingGlass size={13} weight="regular" />
-                          </button>
-                          <span className="font-sans text-[10px] text-text-secondary bg-surface-2 px-2 py-0.5 rounded border border-border-hairline/45 font-semibold">
-                            7 Regions
-                          </span>
+                        <div>
+                          <h3 className="card-title">Locations</h3>
+                          <p className="card-subtitle">{weatherList.length} cities</p>
                         </div>
+                        <button
+                          onClick={() => setWeatherSearchDesktopOpen(true)}
+                          className="btn btn-ghost btn-icon btn-sm"
+                          title="Search locations"
+                          aria-label="Search locations"
+                          id="weather-search-btn-desktop"
+                        >
+                          <MagnifyingGlass size={16} />
+                        </button>
                       </>
                     )}
                   </div>
 
-                  <div className="flex flex-col flex-1 max-h-[500px] overflow-y-auto divide-y divide-border-hairline/40">
-                    {(() => {
-                      const filteredList = (data.weather || []).filter(w =>
-                        w.city.toLowerCase().includes(weatherSearch.toLowerCase()) ||
-                        w.country.toLowerCase().includes(weatherSearch.toLowerCase())
+                  <div className="flex flex-col gap-0.5 max-h-[560px] overflow-y-auto scroll-fade -mx-1 px-1 pb-4">
+                    {weatherFiltered.length === 0 ? (
+                      <div className="py-10 text-center">
+                        <p className="text-[14px] font-medium text-text-primary">No matches</p>
+                        <p className="text-[13px] text-text-muted mt-0.5">No locations match "{weatherSearch}"</p>
+                      </div>
+                    ) : weatherFiltered.map((w) => {
+                      const isSelected = w.city.toLowerCase() === selectedCity.toLowerCase();
+                      return (
+                        <div
+                          key={w.city}
+                          onClick={() => weatherSelect(w.city)}
+                          className="list-row justify-between" aria-selected={isSelected}
+                        >
+                          <div className="min-w-0">
+                            <p className="text-[14px] font-medium text-text-primary truncate">{w.city}</p>
+                            <p className="text-[12px] text-text-muted truncate">{w.country}</p>
+                          </div>
+                          <span className="text-[14px] font-semibold text-text-primary tabular-nums shrink-0">{formatTemp(w.temp)}</span>
+                        </div>
                       );
-
-                      if (filteredList.length === 0) {
-                        return (
-                          <div className="py-10 text-center text-xs text-text-secondary font-medium">
-                            No locations match "{weatherSearch}"
-                          </div>
-                        );
-                      }
-
-                      return filteredList.map((w) => {
-                        const isSelected = w.city.toLowerCase() === selectedCity.toLowerCase();
-                        return (
-                          <div
-                            key={w.city}
-                            onClick={() => { setSelectedCity(w.city); setSelectedCountryCode(MONITORED_CITIES.find(c => c.city === w.city)?.code || 'US'); }}
-                            className={`p-3 rounded-2xl transition-all cursor-pointer flex items-center justify-between border my-0.5 ${isSelected
-                              ? 'bg-surface-1 border-border-strong shadow-xs font-semibold'
-                              : 'bg-transparent border-transparent hover:bg-surface-2/55'
-                              }`}
-                          >
-                            <div>
-                              <p className="font-sans font-medium text-xs text-text-primary">{w.city}</p>
-                              <p className="text-[10px] text-text-secondary font-sans font-medium">{w.country}</p>
-                            </div>
-                            <span className="font-mono text-xs font-semibold text-text-primary tabular-nums">{formatTemp(w.temp)}</span>
-                          </div>
-                        );
-                      });
-                    })()}
+                    })}
                   </div>
-                </div>
+                </aside>
 
-                {/* Center Detail forecast panel — Span 9 */}
-                <div className="lg:col-span-9 flex flex-col gap-6">
+                {/* Detail column */}
+                <div className="col-span-8 lg:col-span-9 flex flex-col gap-6 min-w-0">
 
-                  {/* Temperature Big Banner and Statistics info */}
-                  <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-
-                    {/* Big Banner details — Span 8 (Keeping border + 2px top category accent border) */}
-                    <div className="md:col-span-8 border border-border-hairline border-t-2 border-t-status-info rounded-3xl bg-surface-1 p-6 shadow-xs flex flex-col justify-between min-h-[220px]">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <span className="font-sans text-xs font-semibold text-status-info">Weather Forecast</span>
-                          <h2 className="font-sans font-light text-4xl tracking-tight text-text-primary mt-2">
-                            {activeWeather?.city}, <span className="font-medium">{activeWeather?.country}</span>
-                          </h2>
-                        </div>
-                        <span className="font-sans text-[10px] text-text-muted">
-                          Lat: {activeWeather?.lat?.toFixed(2)} • Lon: {activeWeather?.lon?.toFixed(2)}
-                        </span>
+                  {/* Current conditions hero */}
+                  <section className="card card-pad md:p-6" id="weather-current-card">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="eyebrow">Current conditions</p>
+                        <h2 className="text-2xl font-semibold tracking-tight text-text-primary mt-1 truncate">
+                          {activeWeather.city}<span className="font-normal text-text-secondary">, {activeWeather.country}</span>
+                        </h2>
+                        <p className="text-[13px] text-text-muted mt-0.5 tabular-nums">
+                          {activeWeather.lat?.toFixed(2)}°, {activeWeather.lon?.toFixed(2)}°{activeWeather.timezone ? ` · ${activeWeather.timezone}` : ''}
+                        </p>
                       </div>
-
-                      <div className="flex items-end justify-between mt-8">
-                        <div>
-                          <h3 className="font-sans font-light text-5xl tracking-tight text-text-primary leading-none tabular-nums">
-                            {formatTemp(activeWeather?.temp)} <span className="text-xl text-text-secondary font-normal ml-1">/ feels {formatTemp(activeWeather?.feelsLike)}</span>
-                          </h3>
-                          <p className="font-sans font-semibold text-xs text-status-info mt-2">
-                            {activeWeather?.condition} Outlook
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-mono text-xs text-text-primary tabular-nums font-semibold">
-                            {activeWeather?.humidity}% Humidity
-                          </p>
-                          <p className="text-[10px] text-text-secondary mt-0.5">
-                            Wind: {activeWeather?.windSpeed} km/h
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Statistics Sidebar — Span 4 (Keeping border + 2px top category accent border) */}
-                    <div className="md:col-span-4 border border-border-hairline border-t-2 border-t-status-indigo rounded-3xl bg-surface-1 p-6 shadow-xs flex flex-col justify-between">
-                      <div>
-                        <h4 className="font-sans font-semibold text-xs text-text-secondary mb-4">Climate Stats</h4>
-
-                        <div className="space-y-4">
-                          {/* Stat 1 */}
-                          <div>
-                            <div className="flex justify-between text-[11px] font-sans text-text-secondary mb-1">
-                              <span>Rainy Days / Month</span>
-                              <span className="font-semibold text-text-primary">{activeWeather?.rainfallDays} days</span>
-                            </div>
-                            <div className="w-full bg-surface-2 h-1.5 rounded-full overflow-hidden">
-                              <div className="bg-status-info h-full rounded-full transition-all duration-500" style={{ width: `${(activeWeather?.rainfallDays / 30) * 100}%` }} />
-                            </div>
-                          </div>
-
-                          {/* Stat 2 */}
-                          <div>
-                            <div className="flex justify-between text-[11px] font-sans text-text-secondary mb-1">
-                              <span>Volatile Days</span>
-                              <span className="font-semibold text-text-primary">{activeWeather?.volatilityDays} days</span>
-                            </div>
-                            <div className="w-full bg-surface-2 h-1.5 rounded-full overflow-hidden">
-                              <div className="bg-status-indigo h-full rounded-full transition-all duration-500" style={{ width: `${(activeWeather?.volatilityDays / 30) * 100}%` }} />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
                       <button
                         onClick={() => handleExportCSV('weather')}
-                        className="mt-6 flex items-center justify-center gap-1.5 px-4 py-2 border border-border-hairline hover:border-status-accent rounded-full text-xs font-sans font-semibold cursor-pointer w-full text-text-primary bg-surface-2"
+                        className="btn btn-secondary btn-sm shrink-0"
                       >
-                        <PhosphorIcon name="download" className="text-sm" />
-                        Export Region CSV
+                        <PhosphorIcon name="download" size={15} className="" />
+                        Export CSV
                       </button>
                     </div>
 
-                  </div>
+                    <div className="flex flex-wrap items-center gap-x-6 gap-y-3 mt-6">
+                      <span className="w-[72px] h-[72px] rounded-2xl bg-surface-2 flex items-center justify-center shrink-0 [&>svg]:size-10" aria-hidden="true">
+                        {getWeatherIcon(activeWeather.weatherCode)}
+                      </span>
+                      <p className="text-6xl font-semibold tracking-[-0.03em] text-text-primary leading-none tabular-nums">
+                        {formatTemp(activeWeather.temp)}
+                      </p>
+                      <div>
+                        <p className="text-lg font-medium text-text-primary leading-tight">{activeWeather.condition}</p>
+                        <p className="text-[14px] text-text-secondary mt-1">Feels like {formatTemp(activeWeather.feelsLike)}</p>
+                        {weatherToday && (
+                          <p className="text-[14px] text-text-secondary tabular-nums">
+                            High {weatherDeg(weatherToday.tempMax)} · Low {weatherDeg(weatherToday.tempMin)}
+                          </p>
+                        )}
+                      </div>
+                    </div>
 
-                  {/* Forecast 7 day Calendar Layout */}
-                  <CalendarGrid forecast={activeWeather?.forecast || []} />
+                    <dl className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-6" id="weather-climate-stats">
+                      {weatherStatTiles.map((s) => (
+                        <div key={s.label} className="rounded-xl bg-surface-2 p-3.5">
+                          <dt className="stat-label">{s.label}</dt>
+                          <dd className="stat-value mt-1">{s.value}</dd>
+                          {s.pct !== null ? (
+                            <div className="w-full bg-surface-3 h-1 rounded-full overflow-hidden mt-2.5" aria-hidden="true">
+                              <div className={`${s.bar} h-full rounded-full transition-all duration-500`} style={{ width: `${s.pct}%` }} />
+                            </div>
+                          ) : (
+                            <div className="h-1 mt-2.5" aria-hidden="true" />
+                          )}
+                        </div>
+                      ))}
+                    </dl>
+                  </section>
 
+                  {/* 7-day forecast strip */}
+                  <CalendarGrid forecast={activeWeather.forecast || []} formatDeg={weatherDeg} />
                 </div>
-
               </div>
 
-              {/* OVERLAY BOTTOM SHEET DRAWER (Mobile locations selector) */}
+              {/* OVERLAY BOTTOM SHEET (mobile city picker) */}
               <AnimatePresence>
                 {mobileLocationsOpen && (
                   <>
-                    {/* Backdrop */}
                     <motion.div
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
@@ -3556,7 +3464,6 @@ export default function App() {
                       id="weather-mobile-backdrop"
                     />
 
-                    {/* Bottom Sheet Panel */}
                     <motion.div
                       initial={{ y: "100%" }}
                       animate={{ y: 0 }}
@@ -3570,94 +3477,77 @@ export default function App() {
                           setMobileLocationsOpen(false);
                         }
                       }}
-                      className="fixed bottom-0 left-0 right-0 max-h-[80vh] bg-surface-2 border-t border-border-hairline rounded-t-[24px] z-50 flex flex-col shadow-2xl overflow-hidden pointer-events-auto"
+                      className="fixed bottom-0 left-0 right-0 max-h-[80vh] bg-surface-1 border-t border-border-hairline rounded-t-[24px] z-50 flex flex-col shadow-2xl overflow-hidden pointer-events-auto"
                       id="weather-mobile-bottom-sheet"
+                      role="dialog"
+                      aria-label="Select city"
                     >
-                      {/* Swipe Handle Indicator */}
-                      <div className="w-10 h-1 bg-border-strong/25 rounded-full mx-auto my-3 shrink-0 cursor-grab active:cursor-grabbing" />
+                      <div className="w-10 h-1 bg-border-strong/40 rounded-full mx-auto my-3 shrink-0 cursor-grab active:cursor-grabbing" />
 
-                      {/* Sheet Inner Content */}
-                      <div className="flex flex-col flex-1 px-5 pb-8 overflow-hidden">
-                        {/* Header */}
-                        <div className="flex items-center justify-between pb-3.5 border-b border-border-hairline shrink-0">
+                      <div className="flex flex-col flex-1 px-4 pb-8 overflow-hidden">
+                        <div className="flex items-center justify-between pb-3 shrink-0">
                           <div>
-                            <h3 className="font-sans font-semibold text-sm text-text-primary">Select Region</h3>
-                            <p className="text-[10px] text-text-secondary mt-0.5">Choose from 7 monitored regions</p>
+                            <h3 className="card-title">Select city</h3>
+                            <p className="card-subtitle">{weatherList.length} monitored locations</p>
                           </div>
                           <button
                             onClick={() => setMobileLocationsOpen(false)}
-                            className="p-1.5 bg-surface-1 border border-border-hairline rounded-full text-text-secondary hover:text-text-primary transition-colors cursor-pointer shrink-0"
+                            className="btn btn-secondary btn-icon h-10 w-10 rounded-full shrink-0"
+                            aria-label="Close"
                           >
-                            <X size={15} />
+                            <X size={16} />
                           </button>
                         </div>
 
-                        {/* Search / Filter Input */}
-                        <div className="relative my-3.5 shrink-0">
+                        <div className="relative mb-3 shrink-0">
                           <input
                             type="text"
-                            placeholder="Search regions..."
+                            placeholder="Search cities"
                             value={weatherSearch}
                             onChange={(e) => setWeatherSearch(e.target.value)}
-                            className="w-full pl-8 pr-8 py-2 rounded-xl bg-surface-1 border border-border-hairline font-sans text-xs focus:outline-none focus:border-border-strong text-text-primary"
+                            className="w-full h-11 pl-9 pr-9 rounded-xl bg-surface-2 border border-border-hairline text-[15px] focus:outline-none focus:border-border-strong text-text-primary"
                             autoFocus
                           />
-                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted">
-                            <MagnifyingGlass size={13} />
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted">
+                            <MagnifyingGlass size={16} />
                           </span>
                           {weatherSearch && (
                             <button
                               onClick={() => setWeatherSearch('')}
-                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary cursor-pointer p-0.5"
+                              className="absolute right-1 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center text-text-muted hover:text-text-primary cursor-pointer"
+                              aria-label="Clear search"
                             >
-                              <X size={12} />
+                              <X size={14} />
                             </button>
                           )}
                         </div>
 
-                        {/* List (Scrollable) */}
-                        <div className="flex-1 overflow-y-auto divide-y divide-border-hairline/30 pr-1">
-                          {(() => {
-                            const filteredList = (data.weather || []).filter(w =>
-                              w.city.toLowerCase().includes(weatherSearch.toLowerCase()) ||
-                              w.country.toLowerCase().includes(weatherSearch.toLowerCase())
+                        <div className="flex-1 overflow-y-auto flex flex-col gap-0.5 -mx-1 px-1">
+                          {weatherFiltered.length === 0 ? (
+                            <div className="py-10 text-center">
+                              <p className="text-[14px] font-medium text-text-primary">No matches</p>
+                              <p className="text-[13px] text-text-muted mt-0.5">No locations match "{weatherSearch}"</p>
+                            </div>
+                          ) : weatherFiltered.map((w) => {
+                            const isSelected = w.city.toLowerCase() === selectedCity.toLowerCase();
+                            return (
+                              <div
+                                key={w.city}
+                                onClick={() => {
+                                  weatherSelect(w.city);
+                                  setMobileLocationsOpen(false);
+                                }}
+                                className="list-row justify-between min-h-12"
+                                aria-selected={isSelected}
+                              >
+                                <div className="min-w-0">
+                                  <p className="text-[14px] font-medium text-text-primary truncate">{w.city}</p>
+                                  <p className="text-[12px] text-text-muted truncate">{w.country} · {w.condition}</p>
+                                </div>
+                                <span className="text-[15px] font-semibold text-text-primary tabular-nums shrink-0">{formatTemp(w.temp)}</span>
+                              </div>
                             );
-
-                            if (filteredList.length === 0) {
-                              return (
-                                <div className="py-10 text-center text-xs text-text-secondary font-medium">
-                                  No locations match "{weatherSearch}"
-                                </div>
-                              );
-                            }
-
-                            return filteredList.map((w) => {
-                              const isSelected = w.city.toLowerCase() === selectedCity.toLowerCase();
-                              return (
-                                <div
-                                  key={w.city}
-                                  onClick={() => {
-                                    setSelectedCity(w.city);
-                                    setSelectedCountryCode(MONITORED_CITIES.find(c => c.city === w.city)?.code || 'US');
-                                    setMobileLocationsOpen(false);
-                                  }}
-                                  className={`py-3 px-2 flex items-center justify-between transition-all cursor-pointer rounded-xl my-0.5 ${isSelected
-                                    ? 'bg-surface-1 border border-border-strong font-semibold shadow-xs'
-                                    : 'hover:bg-surface-1/40 border border-transparent'
-                                    }`}
-                                >
-                                  <div>
-                                    <p className="font-sans font-medium text-xs text-text-primary">{w.city}</p>
-                                    <p className="text-[10px] text-text-secondary font-sans font-medium">{w.country}</p>
-                                  </div>
-                                  <div className="flex items-center gap-2.5">
-                                    <span className="font-mono text-xs font-semibold text-text-primary tabular-nums">{formatTemp(w.temp)}</span>
-                                    <span className="text-[10px] text-text-secondary font-medium bg-surface-1 px-2 py-0.5 rounded border border-border-hairline/45">{w.condition}</span>
-                                  </div>
-                                </div>
-                              );
-                            });
-                          })()}
+                          })}
                         </div>
                       </div>
                     </motion.div>
@@ -3665,438 +3555,425 @@ export default function App() {
                 )}
               </AnimatePresence>
             </>
-          )}
+            );
+          })()}
 
           {/* ==================== TAB 4: CURRENCY DETAIL ==================== */}
-          {activeTab === 'currency' && (
-            <>
-              {/* MOBILE ONLY VIEW (viewport <= 480px) */}
-              <div className="block min-[481px]:hidden space-y-4 animate-slide-up" id="currency-tab-mobile">
-                {/* Detail Card */}
-                <div className="border border-border-hairline border-t-2 border-t-status-info rounded-3xl bg-surface-1 p-5 shadow-xs flex flex-col justify-between" id="currency-mobile-detail-card">
-                  <div>
-                    <div className="flex justify-between items-start gap-2">
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <div className="flex -space-x-1 shrink-0">
-                            <CountryFlag code={getCurrencyFlagCode(fromCurrency)} className="w-5 h-3.5 rounded-xs object-cover border border-surface-1 shadow-2xs" />
-                            <CountryFlag code={getCurrencyFlagCode(toCurrency)} className="w-5 h-3.5 rounded-xs object-cover border border-surface-1 shadow-2xs" />
-                          </div>
-                          <span className="font-sans text-[10px] font-semibold text-status-info uppercase tracking-wider">Exchange Rates</span>
-                        </div>
-                        <div className="flex flex-col gap-1.5 mt-2">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              value={conversionAmount}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                if (/^\d*\.?\d*$/.test(val)) {
-                                  setConversionAmount(val);
-                                }
-                              }}
-                              className="w-16 px-1.5 py-0.5 text-center rounded bg-surface-2 border border-border-hairline text-text-primary font-medium focus:outline-none focus:border-border-strong text-xs"
-                            />
+          {activeTab === 'currency' && (() => {
+            const currencyRate = getCrossRate(fromCurrency, toCurrency);
+            const currencyAmountNum = parseFloat(conversionAmount);
+            const currencyConverted = isNaN(currencyAmountNum) || currencyAmountNum < 0 ? 0 : currencyAmountNum * currencyRate;
+            const currencyConvertedText = currencyConverted.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            const currencyChange = activeCurrency?.change24h ?? 0;
+            const currencyIsUp = currencyChange >= 0;
+            const currencyChangeText = `${currencyIsUp ? '▲' : '▼'} ${Math.abs(currencyChange).toFixed(2)}%`;
+            const currencyPairMatches = activeCurrency?.base === fromCurrency && activeCurrency?.target === toCurrency;
+            const currencyVolatility = activeCurrency?.volatility ?? 0;
+            const currencyVolTone: 'success' | 'attention' | 'warning' = currencyVolatility < 30 ? 'success' : currencyVolatility < 60 ? 'attention' : 'warning';
+            const currencyVolLabel = currencyVolatility < 30 ? 'Low' : currencyVolatility < 60 ? 'Moderate' : 'High';
+            const currencyPairLabel = activeCurrency ? `${activeCurrency.base} to ${activeCurrency.target}` : 'Exchange rate';
+            const currencyListLimit = 5;
 
-                            <select
-                              value={fromCurrency}
-                              onChange={(e) => {
-                                setFromCurrency(e.target.value);
-                                const matched = data?.currency?.find(c => c.base === e.target.value && c.target === toCurrency);
-                                if (matched) {
-                                  setSelectedCurrencyId(matched.id);
-                                }
-                              }}
-                              className="bg-surface-2 border border-border-hairline rounded px-1.5 py-0.5 text-[11px] text-text-primary font-semibold focus:outline-none cursor-pointer"
-                            >
-                              {supportedCurrencies.map(cur => (
-                                <option key={cur} value={cur} className="bg-surface-1 text-text-primary">
-                                  {cur}
-                                </option>
-                              ))}
-                            </select>
+            const currencySetFrom = (val: string) => {
+              setFromCurrency(val);
+              const matched = data?.currency?.find(c => c.base === val && c.target === toCurrency);
+              if (matched) {
+                setSelectedCurrencyId(matched.id);
+              }
+            };
+            const currencySetTo = (val: string) => {
+              setToCurrency(val);
+              const matched = data?.currency?.find(c => c.base === fromCurrency && c.target === val);
+              if (matched) {
+                setSelectedCurrencyId(matched.id);
+              }
+            };
+            const currencySwap = () => {
+              const temp = fromCurrency;
+              setFromCurrency(toCurrency);
+              setToCurrency(temp);
+              const matched = data?.currency?.find(c => c.base === toCurrency && c.target === temp);
+              if (matched) {
+                setSelectedCurrencyId(matched.id);
+              }
+            };
+            // Picking a pair also loads it into the converter so the hero, chart and details agree
+            const currencySelectPair = (c: CurrencyPair) => {
+              setSelectedCurrencyId(c.id);
+              setFromCurrency(c.base);
+              setToCurrency(c.target);
+            };
 
-                            <button
-                              onClick={() => {
-                                const temp = fromCurrency;
-                                setFromCurrency(toCurrency);
-                                setToCurrency(temp);
-                                const matched = data?.currency?.find(c => c.base === toCurrency && c.target === temp);
-                                if (matched) {
-                                  setSelectedCurrencyId(matched.id);
-                                }
-                              }}
-                              className="p-1 hover:bg-surface-2 rounded-full border border-border-hairline/30 text-text-secondary hover:text-text-primary transition-colors cursor-pointer flex items-center justify-center"
-                              title="Swap currencies"
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-arrow-left-right">
-                                <path d="M8 3 4 7l4 4" />
-                                <path d="M4 7h16" />
-                                <path d="m16 21 4-4-4-4" />
-                                <path d="M20 17H4" />
-                              </svg>
-                            </button>
+            const currencySelectCls = "h-11 w-full min-w-0 rounded-lg bg-surface-2 border border-border-hairline px-3 text-[15px] font-semibold text-text-primary focus:outline-none focus:border-border-strong focus:bg-surface-1 cursor-pointer";
 
-                            <select
-                              value={toCurrency}
-                              onChange={(e) => {
-                                setToCurrency(e.target.value);
-                                const matched = data?.currency?.find(c => c.base === fromCurrency && c.target === e.target.value);
-                                if (matched) {
-                                  setSelectedCurrencyId(matched.id);
-                                }
-                              }}
-                              className="bg-surface-2 border border-border-hairline rounded px-1.5 py-0.5 text-[11px] text-text-primary font-semibold focus:outline-none cursor-pointer"
-                            >
-                              {supportedCurrencies.map(cur => (
-                                <option key={cur} value={cur} className="bg-surface-1 text-text-primary">
-                                  {cur}
-                                </option>
-                              ))}
-                            </select>
+            const currencyAmountField = (
+              <label className="flex flex-col gap-1.5">
+                <span className="stat-label">Amount</span>
+                <div className="relative">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={conversionAmount}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (/^\d*\.?\d*$/.test(val)) {
+                        setConversionAmount(val);
+                      }
+                    }}
+                    className="h-11 w-full rounded-lg bg-surface-2 border border-border-hairline pl-3 pr-14 text-[17px] font-medium text-text-primary tabular-nums focus:outline-none focus:border-border-strong focus:bg-surface-1"
+                  />
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[14px] font-semibold text-text-muted pointer-events-none">{fromCurrency}</span>
+                </div>
+              </label>
+            );
 
-                            <span className="text-text-muted text-xs font-light">=</span>
+            const currencyPairFields = (
+              <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-end gap-2">
+                <label className="flex flex-col gap-1.5 min-w-0">
+                  <span className="stat-label flex items-center gap-1.5">
+                    <CountryFlag code={getCurrencyFlagCode(fromCurrency)} className="w-5 h-3.5 rounded-xs object-cover" />
+                    From
+                  </span>
+                  <select value={fromCurrency} onChange={(e) => currencySetFrom(e.target.value)} className={currencySelectCls}>
+                    {supportedCurrencies.map(cur => (
+                      <option key={cur} value={cur} className="bg-surface-1 text-text-primary">{cur}</option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  onClick={currencySwap}
+                  className="btn btn-secondary btn-icon h-11 w-11"
+                  title="Swap currencies"
+                  aria-label="Swap currencies"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M8 3 4 7l4 4" />
+                    <path d="M4 7h16" />
+                    <path d="m16 21 4-4-4-4" />
+                    <path d="M20 17H4" />
+                  </svg>
+                </button>
+                <label className="flex flex-col gap-1.5 min-w-0">
+                  <span className="stat-label flex items-center gap-1.5">
+                    <CountryFlag code={getCurrencyFlagCode(toCurrency)} className="w-5 h-3.5 rounded-xs object-cover" />
+                    To
+                  </span>
+                  <select value={toCurrency} onChange={(e) => currencySetTo(e.target.value)} className={currencySelectCls}>
+                    {supportedCurrencies.map(cur => (
+                      <option key={cur} value={cur} className="bg-surface-1 text-text-primary">{cur}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            );
 
-                            <span className="font-semibold text-status-info text-xs tabular-nums">
-                              {(() => {
-                                const amt = parseFloat(conversionAmount);
-                                if (isNaN(amt) || amt < 0) return '0.00';
-                                const crossRate = getCrossRate(fromCurrency, toCurrency);
-                                return (amt * crossRate).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                              })()}
-                            </span>
-                            <span className="font-semibold text-status-info text-[11px]">
-                              {toCurrency}
-                            </span>
-                          </div>
-                          <div className="text-[10px] text-text-muted font-mono">
-                            1 {fromCurrency} = {getCrossRate(fromCurrency, toCurrency).toFixed(4)} {toCurrency}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col items-end gap-2 shrink-0">
-                        <span className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-semibold ${activeCurrency?.change24h >= 0 ? 'bg-status-success-bg text-status-success' : 'bg-status-danger-bg text-status-danger'
-                          }`}>
-                          {activeCurrency?.change24h >= 0 ? '+' : ''}{activeCurrency?.change24h?.toFixed(2)}%
-                        </span>
-
-                        <button
-                          onClick={() => setMobileCurrenciesOpen(true)}
-                          className="flex items-center gap-1 px-2.5 py-1.5 bg-surface-2 border border-border-hairline hover:border-border-strong rounded-full text-[10px] font-medium text-text-primary cursor-pointer transition-colors"
-                          id="currency-switcher-trigger-mobile"
-                        >
-                          <Compass size={11} />
-                          <span className="text-[9px] font-medium">Exchange rates ▾</span>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Historical trend chart */}
-                  <div className="p-3 bg-surface-2 rounded-2xl mt-4">
-                    <h4 className="font-sans font-semibold text-[11px] text-text-secondary mb-3">
-                      Historical Trend (7 Days)
-                    </h4>
-                    <div className="h-[160px] w-full" id="currency-mobile-chart-container">
-                      <CurrencyHistoryChart data={activeCurrency?.history || []} targetCurrency={activeCurrency?.target || 'EUR'} />
-                    </div>
-                  </div>
-
-                  {/* Currency profile inside the scrollable detail flow */}
-                  <div className="mt-4 pt-4 border-t border-border-hairline/40 space-y-3.5 text-xs font-sans" id="currency-mobile-profile">
-                    <h4 className="font-sans font-semibold text-[11px] text-text-secondary uppercase tracking-wider">Currency Profile</h4>
-
-                    {/* Base currency row */}
-                    <div className="flex justify-between items-center py-1">
-                      <span className="text-text-muted font-sans font-medium text-[11px]">Base Currency</span>
-                      <div className="flex items-center gap-2">
-                        <CountryFlag code={getCurrencyFlagCode(activeCurrency?.base || 'USD')} className="w-5 h-3.5 rounded-xs" />
-                        <p className="text-text-primary font-semibold text-xs">{activeCurrency?.base} — {getCurrencyFullName(activeCurrency?.base || 'USD')}</p>
-                      </div>
-                    </div>
-
-                    {/* Target currency row */}
-                    <div className="flex justify-between items-center py-1">
-                      <span className="text-text-muted font-sans font-medium text-[11px]">Target Currency</span>
-                      <div className="flex items-center gap-2">
-                        <CountryFlag code={getCurrencyFlagCode(activeCurrency?.target || 'EUR')} className="w-5 h-3.5 rounded-xs" />
-                        <p className="text-text-primary font-semibold text-xs">{activeCurrency?.target} — {getCurrencyFullName(activeCurrency?.target || 'EUR')}</p>
-                      </div>
-                    </div>
-
-                    {/* Index volatility progress row */}
-                    <div className="border-t border-border-hairline/40 pt-3">
-                      <div className="flex justify-between text-[11px] font-sans font-medium text-text-secondary mb-1.5">
-                        <span>Index Volatility</span>
-                        <span className="font-semibold text-text-primary">{activeCurrency?.volatility}%</span>
-                      </div>
-                      <div className="w-full bg-surface-2 h-1.5 rounded-full overflow-hidden">
-                        <div className="bg-status-indigo h-full rounded-full transition-all" style={{ width: `${activeCurrency?.volatility}%` }} />
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Export exchange pairs at the bottom */}
-                  <button
-                    onClick={() => handleExportCSV('currency')}
-                    className="mt-5 flex items-center justify-center gap-1.5 px-4 py-2.5 bg-text-primary text-surface-1 rounded-full text-xs font-sans font-bold shadow-sm hover:shadow-md cursor-pointer w-full transition-all duration-150"
-                    id="currency-mobile-export-btn"
-                  >
-                    <PhosphorIcon name="download" className="text-xs" />
-                    Export Exchange Pairs
-                  </button>
+            const currencyResult = (
+              <div className="min-w-0">
+                <p className="stat-label">{conversionAmount || '0'} {fromCurrency} equals</p>
+                <p className="stat-hero mt-1.5 break-words">
+                  {currencyConvertedText} <span className="text-[20px] md:text-[24px] font-semibold text-text-secondary tracking-normal">{toCurrency}</span>
+                </p>
+                <div className="flex flex-wrap items-center gap-2 mt-2">
+                  <span className="text-[13px] text-text-muted tabular-nums">1 {fromCurrency} = {currencyRate.toFixed(4)} {toCurrency}</span>
+                  {currencyPairMatches && (
+                    <StatusBadge tone={currencyIsUp ? 'success' : 'critical'} progress={null}>{currencyChangeText} 24h</StatusBadge>
+                  )}
                 </div>
               </div>
+            );
 
-              {/* DESKTOP & TABLET VIEW (viewport > 480px) */}
-              <div className="hidden min-[481px]:grid grid-cols-1 lg:grid-cols-12 gap-6 animate-slide-up" id="currency-tab-view">
+            const currencySearchField = (
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none">
+                  <MagnifyingGlass size={15} />
+                </span>
+                <input
+                  type="text"
+                  placeholder="Search pairs, e.g. EUR"
+                  aria-label="Search currency pairs"
+                  value={currencySearch}
+                  onChange={(e) => setCurrencySearch(e.target.value)}
+                  className="w-full h-10 pl-9 pr-10 rounded-lg bg-surface-2 border border-border-hairline font-sans text-[14px] text-text-primary placeholder:text-text-muted focus:outline-none focus:border-border-strong focus:bg-surface-1 transition-colors"
+                />
+                {currencySearch && (
+                  <button
+                    type="button"
+                    onClick={() => setCurrencySearch('')}
+                    className="absolute right-1 top-1/2 -translate-y-1/2 w-8 h-8 inline-flex items-center justify-center rounded-md text-text-muted hover:text-text-primary hover:bg-surface-3 cursor-pointer"
+                    aria-label="Clear search"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+            );
 
-                {/* Left Column (Currency Select list) — Span 3 — No borders, list style */}
-                <div className="lg:col-span-3 p-1 flex flex-col gap-4">
-                  <div className="flex items-center justify-between border-b border-border-hairline pb-3">
-                    <h3 className="font-sans font-semibold text-xs text-text-secondary">Exchange Rates</h3>
-                    <span className="font-sans text-[10px] text-text-secondary bg-surface-2 px-2 py-0.5 rounded border border-border-hairline/45 font-semibold">
-                      {filteredCurrencies.length} Active
+            const currencyEmpty = (
+              <div className="py-10 px-4 flex flex-col items-center text-center gap-1.5">
+                <span className="w-10 h-10 rounded-full bg-surface-2 inline-flex items-center justify-center text-text-muted mb-1">
+                  <MagnifyingGlass size={18} />
+                </span>
+                <p className="text-[14px] font-medium text-text-primary">No pairs found</p>
+                <p className="text-[13px] text-text-muted">Nothing matches "{currencySearch}".</p>
+                <button type="button" onClick={() => setCurrencySearch('')} className="btn btn-secondary btn-sm mt-2">
+                  Clear search
+                </button>
+              </div>
+            );
+
+            const renderCurrencyRow = (c: CurrencyPair, onPick: () => void) => {
+              const up = c.change24h >= 0;
+              return (
+                <button
+                  type="button"
+                  key={c.id}
+                  onClick={onPick}
+                  className="list-row min-h-[52px]"
+                  aria-selected={c.id === selectedCurrencyId}
+                >
+                  <div className="flex -space-x-1.5 shrink-0">
+                    <CountryFlag code={getCurrencyFlagCode(c.base)} className="w-6 h-4 rounded-xs object-cover border border-surface-1" />
+                    <CountryFlag code={getCurrencyFlagCode(c.target)} className="w-6 h-4 rounded-xs object-cover border border-surface-1" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[14px] font-medium text-text-primary truncate">{c.base} to {c.target}</p>
+                    <p className="text-[12px] text-text-muted">Volume {(c.volume / 1e6).toFixed(0)}M</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <p className="text-[14px] font-medium text-text-primary tabular-nums">{c.rate.toFixed(4)}</p>
+                    <p className={`text-[12px] font-medium tabular-nums ${up ? 'text-status-success' : 'text-status-danger'}`}>
+                      {up ? '▲' : '▼'} {Math.abs(c.change24h).toFixed(2)}%
+                    </p>
+                  </div>
+                </button>
+              );
+            };
+
+            const currencyTrendHeader = (
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="flex -space-x-1.5 shrink-0">
+                    <CountryFlag code={getCurrencyFlagCode(activeCurrency?.base || 'USD')} className="w-6 h-4 rounded-xs object-cover border border-surface-1" />
+                    <CountryFlag code={getCurrencyFlagCode(activeCurrency?.target || 'EUR')} className="w-6 h-4 rounded-xs object-cover border border-surface-1" />
+                  </div>
+                  <div className="min-w-0">
+                    <h3 className="card-title truncate">{currencyPairLabel}</h3>
+                    <p className="card-subtitle">Last 7 days · now {activeCurrency?.rate?.toFixed(4)}</p>
+                  </div>
+                </div>
+                <StatusBadge tone={currencyIsUp ? 'success' : 'critical'} progress={null}>{currencyChangeText}</StatusBadge>
+              </div>
+            );
+
+            const currencyDetails = (
+              <dl className="grid grid-cols-2 gap-x-4 gap-y-4">
+                <div className="min-w-0">
+                  <dt className="stat-label">Base</dt>
+                  <dd className="flex items-center gap-2 mt-1 min-w-0">
+                    <CountryFlag code={getCurrencyFlagCode(activeCurrency?.base || 'USD')} className="w-5 h-3.5 rounded-xs object-cover shrink-0" />
+                    <span className="text-[14px] font-semibold text-text-primary">{activeCurrency?.base}</span>
+                  </dd>
+                  <dd className="text-[13px] text-text-muted truncate">{getCurrencyFullName(activeCurrency?.base || 'USD')}</dd>
+                </div>
+                <div className="min-w-0">
+                  <dt className="stat-label">Target</dt>
+                  <dd className="flex items-center gap-2 mt-1 min-w-0">
+                    <CountryFlag code={getCurrencyFlagCode(activeCurrency?.target || 'EUR')} className="w-5 h-3.5 rounded-xs object-cover shrink-0" />
+                    <span className="text-[14px] font-semibold text-text-primary">{activeCurrency?.target}</span>
+                  </dd>
+                  <dd className="text-[13px] text-text-muted truncate">{getCurrencyFullName(activeCurrency?.target || 'EUR')}</dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className="flex items-center justify-between gap-2">
+                    <span className="stat-label">Volatility index</span>
+                    <span className="flex items-center gap-2">
+                      <span className="text-[14px] font-semibold text-text-primary tabular-nums">{currencyVolatility}%</span>
+                      <StatusBadge tone={currencyVolTone} progress={null} size="xs">{currencyVolLabel}</StatusBadge>
                     </span>
-                  </div>
+                  </dt>
+                  <dd className="mt-2 w-full bg-surface-2 h-1.5 rounded-full overflow-hidden">
+                    <div className="bg-status-indigo h-full rounded-full transition-all" style={{ width: `${Math.min(100, Math.max(0, currencyVolatility))}%` }} />
+                  </dd>
+                </div>
+              </dl>
+            );
 
-                  {/* Search box and search button */}
-                  <div className="relative mb-2 shrink-0 flex items-center gap-1.5">
-                    <div className="relative flex-1">
-                      <input
-                        type="text"
-                        placeholder="Search pairs..."
-                        value={currencySearch}
-                        onChange={(e) => setCurrencySearch(e.target.value)}
-                        className="w-full pl-8 pr-7 py-1.5 rounded-xl bg-surface-2 border border-border-hairline font-sans text-xs focus:outline-none focus:border-border-strong text-text-primary"
-                      />
-                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted">
-                        <MagnifyingGlass size={12} />
-                      </span>
-                      {currencySearch && (
-                        <button
-                          onClick={() => setCurrencySearch('')}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary cursor-pointer p-0.5"
-                        >
-                          <X size={11} />
-                        </button>
-                      )}
-                    </div>
-                    <button
-                      className="px-2.5 py-1.5 rounded-xl bg-surface-2 border border-border-hairline text-text-secondary hover:text-text-primary text-[11px] font-sans font-medium cursor-pointer transition-colors shrink-0 flex items-center justify-center min-h-[28px]"
-                    >
-                      Search
-                    </button>
+            return (
+            <>
+              {/* ==================== MOBILE LAYOUT (< 768px) ==================== */}
+              {/* Converter result stays on top; Trend / Pairs / Details switch below it */}
+              <div className="flex md:hidden flex-col gap-3 w-full max-w-[480px] mx-auto animate-slide-up" id="currency-tab-mobile">
+                <section className="card px-4 py-3.5 flex flex-col gap-2.5" id="currency-mobile-detail-card" aria-label="Currency converter">
+                  {/* From · swap · To, with flags inside the pickers */}
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+                    {([['From', fromCurrency, currencySetFrom], ['To', toCurrency, currencySetTo]] as const).map(([label, value, onChange], i) => (
+                      <React.Fragment key={label}>
+                        {i === 1 && (
+                          <button type="button" onClick={currencySwap} className="btn btn-secondary btn-icon h-11 w-11" aria-label="Swap currencies" title="Swap currencies">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <path d="M8 3 4 7l4 4" />
+                              <path d="M4 7h16" />
+                              <path d="m16 21 4-4-4-4" />
+                              <path d="M20 17H4" />
+                            </svg>
+                          </button>
+                        )}
+                        <label className="relative min-w-0">
+                          <span className="sr-only">{label} currency</span>
+                          <CountryFlag code={getCurrencyFlagCode(value)} className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-3.5 rounded-xs object-cover pointer-events-none" />
+                          <select value={value} onChange={(e) => onChange(e.target.value)} className={`${currencySelectCls} pl-10`}>
+                            {supportedCurrencies.map(cur => (
+                              <option key={cur} value={cur} className="bg-surface-1 text-text-primary">{cur}</option>
+                            ))}
+                          </select>
+                        </label>
+                      </React.Fragment>
+                    ))}
                   </div>
-
-                  <div className="flex flex-col flex-1 max-h-[500px] overflow-y-auto divide-y divide-border-hairline/40">
-                    {filteredCurrencies.length === 0 ? (
-                      <div className="py-6 text-center text-xs text-text-secondary">
-                        No pairs found
-                      </div>
-                    ) : (
-                      filteredCurrencies.map((c) => {
-                        const isSelected = c.id === selectedCurrencyId;
-                        return (
-                          <div
-                            key={c.id}
-                            onClick={() => setSelectedCurrencyId(c.id)}
-                            className={`p-3 rounded-2xl transition-all cursor-pointer flex items-center justify-between border my-0.5 ${isSelected
-                              ? 'bg-surface-1 border-border-strong shadow-xs font-semibold'
-                              : 'bg-transparent border-transparent hover:bg-surface-2/55'
-                              }`}
-                          >
-                            <div className="flex items-center gap-2.5">
-                              <div className="flex -space-x-1.5 relative shrink-0">
-                                <CountryFlag code={getCurrencyFlagCode(c.base)} className="w-5 h-3.5 rounded-xs object-cover border border-surface-1" />
-                                <CountryFlag code={getCurrencyFlagCode(c.target)} className="w-5 h-3.5 rounded-xs object-cover border border-surface-1" />
-                              </div>
-                              <div>
-                                <p className="font-sans font-medium text-xs text-text-primary">{c.base} to {c.target}</p>
-                                <p className="text-[10px] text-text-secondary font-sans font-medium">Volume: {(c.volume / 1e6).toFixed(0)}M</p>
-                              </div>
-                            </div>
-                            <span className="font-mono text-xs font-semibold text-text-primary tabular-nums">{c.rate.toFixed(3)}</span>
-                          </div>
-                        );
-                      })
+                  {/* Amount */}
+                  <label className="relative">
+                    <span className="sr-only">Amount in {fromCurrency}</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={conversionAmount}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (/^\d*\.?\d*$/.test(val)) setConversionAmount(val);
+                      }}
+                      className="h-11 w-full rounded-lg bg-surface-2 border border-border-hairline pl-3 pr-14 text-[16px] font-medium text-text-primary tabular-nums focus:outline-none focus:border-border-strong focus:bg-surface-1"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[13px] font-semibold text-text-muted pointer-events-none">{fromCurrency}</span>
+                  </label>
+                  {/* Result */}
+                  <div className="pt-2.5 border-t border-border-hairline flex flex-wrap items-end justify-between gap-x-3 gap-y-1">
+                    <p className="text-[30px] font-semibold tracking-[-0.03em] leading-none text-text-primary tabular-nums break-all">
+                      {currencyConvertedText} <span className="text-[17px] font-semibold text-text-secondary tracking-normal">{toCurrency}</span>
+                    </p>
+                    {currencyPairMatches && (
+                      <StatusBadge tone={currencyIsUp ? 'success' : 'critical'} progress={null}>{currencyChangeText} 24h</StatusBadge>
                     )}
                   </div>
+                  <p className="text-[12.5px] text-text-muted tabular-nums -mt-1">1 {fromCurrency} = {currencyRate.toFixed(4)} {toCurrency}</p>
+                </section>
+
+                <div className="segmented segmented-full [&>button]:h-10" role="group" aria-label="Currency sections">
+                  {([['trend', 'Trend'], ['pairs', 'Pairs'], ['details', 'Details']] as const).map(([tab, label]) => (
+                    <button key={tab} type="button" role="tab" onClick={() => setCurrencyMobileSection(tab)} aria-pressed={currencyMobileSection === tab} aria-selected={currencyMobileSection === tab}>
+                      {label}
+                    </button>
+                  ))}
                 </div>
 
-                {/* Center Detail panel — Span 9 */}
-                <div className="lg:col-span-9 flex flex-col gap-6">
+                {currencyMobileSection === 'trend' && (
+                  <section className="card card-pad" id="currency-mobile-chart-container">
+                    {currencyTrendHeader}
+                    <CurrencyHistoryChart data={activeCurrency?.history || []} targetCurrency={activeCurrency?.target || 'EUR'} />
+                  </section>
+                )}
 
-                  {/* Big Currency rate display */}
-                  <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-
-                    {/* Chart and Banner — Span 8 (Keeping border + 2px top category accent border) */}
-                    <div className="md:col-span-8 border border-border-hairline border-t-2 border-t-status-info rounded-3xl bg-surface-1 p-6 shadow-xs flex flex-col gap-4">
-                      <div className="flex items-start justify-between border-b border-border-hairline/40 pb-3">
-                        <div className="flex items-start gap-3">
-                          <div className="flex -space-x-2 shrink-0 mt-1.5">
-                            <CountryFlag code={getCurrencyFlagCode(fromCurrency)} className="w-8 h-5.5 rounded-sm object-cover border-2 border-surface-1 shadow-sm" />
-                            <CountryFlag code={getCurrencyFlagCode(toCurrency)} className="w-8 h-5.5 rounded-sm object-cover border-2 border-surface-1 shadow-sm" />
-                          </div>
-                          <div>
-                            <span className="font-sans text-xs font-semibold text-status-info">Exchange Rates</span>
-                            <div className="flex flex-col gap-2 mt-1.5">
-                              <div className="flex items-center gap-3 flex-wrap">
-                                <input
-                                  type="text"
-                                  inputMode="decimal"
-                                  value={conversionAmount}
-                                  onChange={(e) => {
-                                    const val = e.target.value;
-                                    if (/^\d*\.?\d*$/.test(val)) {
-                                      setConversionAmount(val);
-                                    }
-                                  }}
-                                  className="w-24 px-2.5 py-1 text-center rounded-xl bg-surface-2 border border-border-hairline text-text-primary font-medium focus:outline-none focus:border-border-strong text-lg md:text-xl"
-                                />
-
-                                <select
-                                  value={fromCurrency}
-                                  onChange={(e) => {
-                                    setFromCurrency(e.target.value);
-                                    const matched = data?.currency?.find(c => c.base === e.target.value && c.target === toCurrency);
-                                    if (matched) {
-                                      setSelectedCurrencyId(matched.id);
-                                    }
-                                  }}
-                                  className="bg-surface-2 border border-border-hairline rounded-xl px-2 py-1 text-sm text-text-primary font-semibold focus:outline-none focus:border-border-strong cursor-pointer h-[36px]"
-                                >
-                                  {supportedCurrencies.map(cur => (
-                                    <option key={cur} value={cur} className="bg-surface-1 text-text-primary">
-                                      {cur}
-                                    </option>
-                                  ))}
-                                </select>
-
-                                <button
-                                  onClick={() => {
-                                    const temp = fromCurrency;
-                                    setFromCurrency(toCurrency);
-                                    setToCurrency(temp);
-                                    const matched = data?.currency?.find(c => c.base === toCurrency && c.target === temp);
-                                    if (matched) {
-                                      setSelectedCurrencyId(matched.id);
-                                    }
-                                  }}
-                                  className="p-1.5 hover:bg-surface-2 rounded-full border border-border-hairline/30 text-text-secondary hover:text-text-primary transition-colors cursor-pointer flex items-center justify-center h-[32px] w-[32px]"
-                                  title="Swap currencies"
-                                >
-                                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-arrow-left-right">
-                                    <path d="M8 3 4 7l4 4" />
-                                    <path d="M4 7h16" />
-                                    <path d="m16 21 4-4-4-4" />
-                                    <path d="M20 17H4" />
-                                  </svg>
-                                </button>
-
-                                <select
-                                  value={toCurrency}
-                                  onChange={(e) => {
-                                    setToCurrency(e.target.value);
-                                    const matched = data?.currency?.find(c => c.base === fromCurrency && c.target === e.target.value);
-                                    if (matched) {
-                                      setSelectedCurrencyId(matched.id);
-                                    }
-                                  }}
-                                  className="bg-surface-2 border border-border-hairline rounded-xl px-2 py-1 text-sm text-text-primary font-semibold focus:outline-none focus:border-border-strong cursor-pointer h-[36px]"
-                                >
-                                  {supportedCurrencies.map(cur => (
-                                    <option key={cur} value={cur} className="bg-surface-1 text-text-primary">
-                                      {cur}
-                                    </option>
-                                  ))}
-                                </select>
-
-                                <span className="text-text-muted text-lg font-light">=</span>
-
-                                <span className="font-semibold text-status-info text-xl md:text-3xl tabular-nums">
-                                  {(() => {
-                                    const amt = parseFloat(conversionAmount);
-                                    if (isNaN(amt) || amt < 0) return '0.00';
-                                    const crossRate = getCrossRate(fromCurrency, toCurrency);
-                                    return (amt * crossRate).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-                                  })()}
-                                </span>
-                                <span className="font-semibold text-status-info text-base md:text-lg">
-                                  {toCurrency}
-                                </span>
-                              </div>
-                              <div className="text-xs text-text-muted font-mono">
-                                1 {fromCurrency} = {getCrossRate(fromCurrency, toCurrency).toFixed(4)} {toCurrency}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                        <span className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-medium ${activeCurrency?.change24h >= 0 ? 'bg-status-success-bg text-status-success' : 'bg-status-danger-bg text-status-danger'
-                          }`}>
-                          {activeCurrency?.change24h >= 0 ? '+' : ''}{activeCurrency?.change24h?.toFixed(2)}%
-                        </span>
-                      </div>
-
-                      <div className="p-2 bg-surface-2 rounded-2xl mt-2">
-                        <h4 className="font-sans font-semibold text-xs text-text-secondary mb-3">
-                          Historical Trend (7 Days)
-                        </h4>
-                        <CurrencyHistoryChart data={activeCurrency?.history || []} targetCurrency={activeCurrency?.target || 'EUR'} />
-                      </div>
+                {currencyMobileSection === 'pairs' && (
+                  <section className="card card-pad flex flex-col gap-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="card-title">Exchange rates</h3>
+                      <StatusBadge tone="neutral" progress={null}>{filteredCurrencies.length} pairs</StatusBadge>
                     </div>
-
-                    {/* Volatility progress card — Span 4 (Keeping border + 2px top category accent border) */}
-                    <div className="md:col-span-4 border border-border-hairline border-t-2 border-t-status-indigo rounded-3xl bg-surface-1 p-6 shadow-xs flex flex-col justify-between">
-                      <div>
-                        <h4 className="font-sans font-semibold text-xs text-text-secondary mb-4">Currency Profile</h4>
-
-                        <div className="space-y-4 text-xs font-sans">
-                          <div>
-                            <p className="text-text-muted font-sans font-semibold text-[11px]">Base Currency</p>
-                            <div className="flex items-center gap-2 mt-1">
-                              <CountryFlag code={getCurrencyFlagCode(activeCurrency?.base || 'USD')} className="w-5 h-3.5 rounded-xs" />
-                              <p className="text-text-primary font-semibold">{activeCurrency?.base} — {getCurrencyFullName(activeCurrency?.base || 'USD')}</p>
-                            </div>
-                          </div>
-                          <div>
-                            <p className="text-text-muted font-sans font-semibold text-[11px]">Target Currency</p>
-                            <div className="flex items-center gap-2 mt-1">
-                              <CountryFlag code={getCurrencyFlagCode(activeCurrency?.target || 'EUR')} className="w-5 h-3.5 rounded-xs" />
-                              <p className="text-text-primary font-semibold">{activeCurrency?.target} — {getCurrencyFullName(activeCurrency?.target || 'EUR')}</p>
-                            </div>
-                          </div>
-
-                          <div className="border-t border-border-hairline my-2 pt-2">
-                            <div className="flex justify-between text-[11px] font-sans font-semibold text-text-secondary mb-1">
-                              <span>Index Volatility</span>
-                              <span className="font-semibold text-text-primary">{activeCurrency?.volatility}%</span>
-                            </div>
-                            <div className="w-full bg-surface-2 h-1.5 rounded-full overflow-hidden">
-                              <div className="bg-status-indigo h-full rounded-full transition-all" style={{ width: `${activeCurrency?.volatility}%` }} />
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
+                    {currencySearchField}
+                    <div className="flex flex-col -mx-2">
+                      {filteredCurrencies.length === 0
+                        ? currencyEmpty
+                        : filteredCurrencies.slice(0, currencyListLimit).map(c => renderCurrencyRow(c, () => currencySelectPair(c)))}
+                    </div>
+                    {filteredCurrencies.length > currencyListLimit && (
                       <button
-                        onClick={() => handleExportCSV('currency')}
-                        className="mt-6 flex items-center justify-center gap-1.5 px-4 py-2 bg-text-primary text-surface-1 rounded-full text-xs font-sans font-bold shadow-sm hover:shadow-md cursor-pointer w-full transition-all duration-150"
+                        type="button"
+                        onClick={() => setMobileCurrenciesOpen(true)}
+                        className="btn btn-secondary w-full h-10"
+                        id="currency-switcher-trigger-mobile"
                       >
-                        <PhosphorIcon name="download" className="text-sm" />
-                        Export Exchange Pairs
+                        Show all {filteredCurrencies.length} pairs
                       </button>
+                    )}
+                  </section>
+                )}
+
+                {currencyMobileSection === 'details' && (
+                  <section className="card card-pad flex flex-col gap-4" id="currency-mobile-profile">
+                    <h3 className="card-title">Pair details</h3>
+                    {currencyDetails}
+                    <button
+                      type="button"
+                      onClick={() => handleExportCSV('currency')}
+                      className="btn btn-secondary w-full h-10"
+                      id="currency-mobile-export-btn"
+                    >
+                      <PhosphorIcon name="download" size={15} />
+                      Export exchange pairs
+                    </button>
+                  </section>
+                )}
+              </div>
+
+              {/* ==================== TABLET & DESKTOP LAYOUT (>= 768px) ==================== */}
+              <div className="hidden md:grid grid-cols-1 lg:grid-cols-12 gap-6 items-start animate-slide-up" id="currency-tab-view">
+
+                {/* Main column: converter + trend */}
+                <div className="lg:col-span-8 flex flex-col gap-6 min-w-0">
+                  <section className="card card-pad" aria-label="Currency converter">
+                    <div className="mb-4">
+                      <h3 className="card-title">Converter</h3>
+                      <p className="card-subtitle">Enter an amount and choose two currencies.</p>
                     </div>
+                    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] gap-6 items-stretch">
+                      <div className="flex flex-col gap-4">
+                        {currencyAmountField}
+                        {currencyPairFields}
+                      </div>
+                      <div className="rounded-xl bg-surface-2 p-5 flex flex-col justify-center">
+                        {currencyResult}
+                      </div>
+                    </div>
+                  </section>
 
-                  </div>
+                  <section className="card card-pad">
+                    {currencyTrendHeader}
+                    <CurrencyHistoryChart data={activeCurrency?.history || []} targetCurrency={activeCurrency?.target || 'EUR'} />
+                  </section>
+                </div>
 
+                {/* Side column: pair list + details (side by side on tablet) */}
+                <div className="lg:col-span-4 grid md:grid-cols-2 lg:grid-cols-1 gap-6 items-start lg:sticky lg:top-4">
+                  <section className="card card-pad flex flex-col gap-3" aria-label="Exchange rates">
+                    <div className="flex items-center justify-between gap-2">
+                      <h3 className="card-title">Exchange rates</h3>
+                      <StatusBadge tone="neutral" progress={null}>{filteredCurrencies.length} pairs</StatusBadge>
+                    </div>
+                    {currencySearchField}
+                    <div className="flex flex-col -mx-2 px-0.5 max-h-[360px] overflow-y-auto scroll-fade pb-4">
+                      {filteredCurrencies.length === 0
+                        ? currencyEmpty
+                        : filteredCurrencies.map(c => renderCurrencyRow(c, () => currencySelectPair(c)))}
+                    </div>
+                  </section>
+
+                  <section className="card card-pad flex flex-col gap-4">
+                    <h3 className="card-title">Pair details</h3>
+                    {currencyDetails}
+                    <button
+                      type="button"
+                      onClick={() => handleExportCSV('currency')}
+                      className="btn btn-secondary w-full"
+                    >
+                      <PhosphorIcon name="download" size={15} />
+                      Export exchange pairs
+                    </button>
+                  </section>
                 </div>
 
               </div>
 
-              {/* OVERLAY BOTTOM SHEET DRAWER (Mobile Currency pairs selector) */}
+              {/* OVERLAY BOTTOM SHEET DRAWER (Mobile: full currency pair list) */}
               <AnimatePresence>
                 {mobileCurrenciesOpen && (
                   <>
@@ -4124,97 +4001,39 @@ export default function App() {
                           setMobileCurrenciesOpen(false);
                         }
                       }}
-                      className="fixed bottom-0 left-0 right-0 max-h-[80vh] bg-surface-2 border-t border-border-hairline rounded-t-[24px] z-50 flex flex-col shadow-2xl overflow-hidden pointer-events-auto"
+                      className="fixed bottom-0 left-0 right-0 max-h-[80vh] bg-surface-1 border-t border-border-hairline rounded-t-[24px] z-50 flex flex-col shadow-2xl overflow-hidden pointer-events-auto"
                       id="currency-mobile-bottom-sheet"
                     >
                       {/* Swipe Handle Indicator */}
-                      <div className="w-10 h-1 bg-border-strong/25 rounded-full mx-auto my-3 shrink-0 cursor-grab active:cursor-grabbing" />
+                      <div className="w-10 h-1 bg-border-strong/40 rounded-full mx-auto my-3 shrink-0 cursor-grab active:cursor-grabbing" />
 
-                      {/* Sheet Inner Content */}
-                      <div className="flex flex-col flex-1 px-5 pb-8 overflow-hidden">
-                        {/* Header */}
-                        <div className="flex items-center justify-between pb-3.5 border-b border-border-hairline shrink-0">
+                      <div className="flex flex-col flex-1 px-4 pb-8 overflow-hidden">
+                        <div className="flex items-center justify-between pb-3 border-b border-border-hairline shrink-0">
                           <div>
-                            <h3 className="font-sans font-semibold text-sm text-text-primary">Exchange Rates</h3>
-                            <p className="text-[10px] text-text-secondary mt-0.5">Select a currency pair</p>
+                            <h3 className="card-title">Exchange rates</h3>
+                            <p className="card-subtitle">Select a currency pair</p>
                           </div>
                           <button
+                            type="button"
                             onClick={() => setMobileCurrenciesOpen(false)}
-                            className="p-1.5 bg-surface-1 border border-border-hairline rounded-full text-text-secondary hover:text-text-primary transition-colors cursor-pointer shrink-0"
+                            className="btn btn-secondary btn-icon h-10 w-10 rounded-full"
+                            aria-label="Close"
                           >
-                            <X size={15} />
+                            <X size={16} />
                           </button>
                         </div>
 
-                        {/* Search / Filter Input */}
-                        <div className="relative my-3.5 shrink-0">
-                          <input
-                            type="text"
-                            placeholder="Search pairs..."
-                            value={currencySearch}
-                            onChange={(e) => setCurrencySearch(e.target.value)}
-                            className="w-full pl-8 pr-8 py-2 rounded-xl bg-surface-1 border border-border-hairline font-sans text-xs focus:outline-none focus:border-border-strong text-text-primary"
-                            autoFocus
-                          />
-                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted">
-                            <MagnifyingGlass size={13} />
-                          </span>
-                          {currencySearch && (
-                            <button
-                              onClick={() => setCurrencySearch('')}
-                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary cursor-pointer p-0.5"
-                            >
-                              <X size={12} />
-                            </button>
-                          )}
+                        <div className="my-3 shrink-0">
+                          {currencySearchField}
                         </div>
 
-                        {/* List (Scrollable) */}
-                        <div className="flex-1 overflow-y-auto divide-y divide-border-hairline/30 pr-1">
-                          {(() => {
-                            const currencyList = data.currency || [];
-                            const filteredList = currencyList.filter(c =>
-                              c.base.toLowerCase().includes(currencySearch.toLowerCase()) ||
-                              c.target.toLowerCase().includes(currencySearch.toLowerCase())
-                            );
-
-                            if (filteredList.length === 0) {
-                              return (
-                                <div className="py-10 text-center text-xs text-text-secondary font-medium">
-                                  No currency pairs match "{currencySearch}"
-                                </div>
-                              );
-                            }
-
-                            return filteredList.map((c) => {
-                              const isSelected = c.id === selectedCurrencyId;
-                              return (
-                                <div
-                                  key={c.id}
-                                  onClick={() => {
-                                    setSelectedCurrencyId(c.id);
-                                    setMobileCurrenciesOpen(false);
-                                  }}
-                                  className={`py-3 px-2 flex items-center justify-between transition-all cursor-pointer rounded-xl my-0.5 ${isSelected
-                                    ? 'bg-surface-1 border border-border-strong font-semibold shadow-xs'
-                                    : 'hover:bg-surface-1/40 border border-transparent'
-                                    }`}
-                                >
-                                  <div className="flex items-center gap-2.5">
-                                    <div className="flex -space-x-1 relative shrink-0">
-                                      <CountryFlag code={getCurrencyFlagCode(c.base)} className="w-5 h-3.5 rounded-xs object-cover border border-surface-1" />
-                                      <CountryFlag code={getCurrencyFlagCode(c.target)} className="w-5 h-3.5 rounded-xs object-cover border border-surface-1" />
-                                    </div>
-                                    <div>
-                                      <p className="font-sans font-medium text-xs text-text-primary">{c.base} to {c.target}</p>
-                                      <p className="text-[10px] text-text-secondary font-sans font-medium">Volume: {(c.volume / 1e6).toFixed(0)}M</p>
-                                    </div>
-                                  </div>
-                                  <span className="font-mono text-xs font-semibold text-text-primary tabular-nums">{c.rate.toFixed(4)}</span>
-                                </div>
-                              );
-                            });
-                          })()}
+                        <div className="flex-1 overflow-y-auto -mx-2 flex flex-col">
+                          {filteredCurrencies.length === 0
+                            ? currencyEmpty
+                            : filteredCurrencies.map(c => renderCurrencyRow(c, () => {
+                              currencySelectPair(c);
+                              setMobileCurrenciesOpen(false);
+                            }))}
                         </div>
                       </div>
                     </motion.div>
@@ -4222,7 +4041,8 @@ export default function App() {
                 )}
               </AnimatePresence>
             </>
-          )}
+            );
+          })()}
 
           {/* ==================== TAB 5: AIR QUALITY & WORLD MAP ==================== */}
           {activeTab === 'aqi' && (
@@ -4230,24 +4050,36 @@ export default function App() {
               {(() => {
                 const activeAQI = data?.aqi?.find(a => a.city.toLowerCase() === selectedCity.toLowerCase()) || data?.aqi?.[0];
                 if (!activeAQI) return (
-                  <div className="text-center py-12 text-xs text-text-secondary font-sans">
-                    Air quality data loading...
+                  <div className="card card-pad py-12 flex flex-col items-center text-center" id="aqi-empty-state">
+                    <span className="w-12 h-12 rounded-2xl bg-surface-2 flex items-center justify-center text-text-muted">
+                      <PhosphorIcon name="wind" size={24} className="" />
+                    </span>
+                    <p className="card-title mt-3">Air quality data is loading</p>
+                    <p className="card-subtitle max-w-xs">Readings from monitoring stations will appear here shortly.</p>
                   </div>
                 );
 
                 const details = getAQILevelDetails(activeAQI.aqi);
+                const aqiLevel = aqiTone(details.status);
+                const aqiAdvice = (activeAQI.healthMessage || details.healthMessage || '').replace(/^[^—]*—\s*/, '');
+                const aqiCityCode = MONITORED_CITIES.find(c => c.city === activeAQI.city)?.code || 'US';
+                const aqiUpdated = new Date(activeAQI.lastUpdated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const aqiSelectCity = (city: string) => {
+                  setSelectedCity(city);
+                  setSelectedCountryCode(MONITORED_CITIES.find(c => c.city === city)?.code || 'US');
+                };
 
                 // Trend calculations for 4h comparison
                 const trendInfo = (() => {
                   if (!activeAQI.trend || activeAQI.trend.length < 5) {
-                    return { text: 'Stable', icon: 'minus', color: 'text-text-muted', change: 0 };
+                    return { text: 'Stable', short: 'Stable', icon: 'minus', color: 'text-text-muted', change: 0 };
                   }
                   const cur = activeAQI.aqi;
                   const past = activeAQI.trend[activeAQI.trend.length - 5]?.aqi || cur;
                   const diff = cur - past;
-                  if (diff > 0) return { text: `Rising (+${diff} AQI vs. 4h ago)`, icon: 'trending-up', color: 'text-status-danger', change: diff };
-                  if (diff < 0) return { text: `Improving (${Math.abs(diff)} AQI vs. 4h ago)`, icon: 'trending-down', color: 'text-status-success', change: diff };
-                  return { text: 'Stable (No change vs. 4h ago)', icon: 'minus', color: 'text-text-muted', change: 0 };
+                  if (diff > 0) return { text: `Rising (+${diff} AQI vs. 4h ago)`, short: `Up ${diff} in 4h`, icon: 'trending-up', color: 'text-status-danger', change: diff };
+                  if (diff < 0) return { text: `Improving (${Math.abs(diff)} AQI vs. 4h ago)`, short: `Down ${Math.abs(diff)} in 4h`, icon: 'trending-down', color: 'text-status-success', change: diff };
+                  return { text: 'Stable (No change vs. 4h ago)', short: 'Stable in 4h', icon: 'minus', color: 'text-text-muted', change: 0 };
                 })();
 
                 const pollutantDefinitions: Record<string, { label: string; desc: string; unit: string }> = {
@@ -4283,340 +4115,355 @@ export default function App() {
                   }
                 };
 
-                return (
-                  <>
-                    {/* Top filter row with Autocomplete Search and Quick Select buttons */}
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-border-hairline/60 pb-4" id="aqi-filter-panel-row">
-                      <div>
-                        <h2 className="font-sans font-light text-2xl tracking-tight text-text-primary">
-                          Air Quality & Atmosphere
-                        </h2>
-                        <p className="text-xs text-text-secondary mt-0.5 font-sans">
-                          Analyze particulate levels, gaseous pollutants, and atmospheric health across selected global centers.
-                        </p>
-                      </div>
+                const aqiPollutants = Object.entries(pollutantDefinitions).map(([key, def]) => {
+                  const val = (activeAQI.pollutants as any)?.[key] || (activeAQI as any)[key] || 0;
+                  const sev = getPollutantSeverityColorLocal(key, val);
+                  const t = aqiTone(sev.label === 'USG' ? 'Unhealthy for Sensitive Groups' : sev.label);
+                  return { key, def, val, sev, tone: t };
+                });
+                const aqiInfoPollutant = aqiPollutants.find(p => p.key === aqiPollutantInfo) || aqiPollutants[0];
 
-                      <div className="flex flex-wrap items-center gap-3 relative" id="aqi-search-autocomplete-wrapper">
-                        {/* Search Input */}
-                        <div className="relative w-full sm:w-64">
-                          <PhosphorIcon name="search" className="text-xs absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
-                          <input
-                            type="text"
-                            placeholder="Search city..."
-                            className="w-full bg-surface-1 border border-border-hairline focus:border-status-accent rounded-full pl-9 pr-8 py-1.5 font-sans text-xs focus:outline-none text-text-primary"
-                            value={aqiSearchQuery}
-                            onFocus={() => setShowAqiSearchDropdown(true)}
-                            onChange={(e) => {
-                              setAqiSearchQuery(e.target.value);
-                              setShowAqiSearchDropdown(true);
-                            }}
-                          />
-                          {aqiSearchQuery && (
-                            <button
-                              onClick={() => { setAqiSearchQuery(''); setShowAqiSearchDropdown(false); }}
-                              className="absolute right-3 top-1/2 -translate-y-1/2 text-text-secondary hover:text-text-primary"
-                            >
-                              <PhosphorIcon name="x" className="text-[10px]" />
-                            </button>
-                          )}
+                // City search with autocomplete (shared state; rendered in mobile + desktop layouts)
+                const renderAqiSearch = (mobile: boolean) => (
+                  <div className={`relative ${mobile ? 'w-full' : 'w-72'}`}>
+                    <PhosphorIcon name="search" size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+                    <input
+                      type="text"
+                      placeholder="Search city"
+                      aria-label="Search city"
+                      className={`w-full bg-surface-1 border border-border-hairline focus:border-border-strong rounded-lg pl-9 pr-10 ${mobile ? 'h-11 text-[15px]' : 'h-9 text-[14px]'} focus:outline-none text-text-primary shadow-xs`}
+                      value={aqiSearchQuery}
+                      onFocus={() => setShowAqiSearchDropdown(true)}
+                      onBlur={() => setTimeout(() => setShowAqiSearchDropdown(false), 200)}
+                      onChange={(e) => {
+                        setAqiSearchQuery(e.target.value);
+                        setShowAqiSearchDropdown(true);
+                      }}
+                    />
+                    {aqiSearchQuery && (
+                      <button
+                        onClick={() => { setAqiSearchQuery(''); setShowAqiSearchDropdown(false); }}
+                        className="absolute right-0 top-1/2 -translate-y-1/2 w-10 h-10 flex items-center justify-center text-text-muted hover:text-text-primary"
+                        aria-label="Clear search"
+                      >
+                        <PhosphorIcon name="x" size={14} className="" />
+                      </button>
+                    )}
 
-                          {/* Autocomplete Dropdown */}
-                          {showAqiSearchDropdown && (
-                            <div className="absolute top-full left-0 right-0 mt-1.5 bg-surface-1 border border-border-strong rounded-2xl shadow-xl z-50 max-h-48 overflow-y-auto" id="aqi-search-autocomplete-dropdown">
-                              {(() => {
-                                const list = data?.aqi || [];
-                                const filtered = list.filter(item =>
-                                  item.city.toLowerCase().includes(aqiSearchQuery.toLowerCase()) ||
-                                  item.country.toLowerCase().includes(aqiSearchQuery.toLowerCase())
-                                );
+                    {showAqiSearchDropdown && (
+                      <div className="absolute top-full left-0 right-0 mt-1.5 bg-surface-1 border border-border-hairline rounded-xl shadow-lg z-50 max-h-64 overflow-y-auto p-1" id={mobile ? 'aqi-search-autocomplete-dropdown-mobile' : 'aqi-search-autocomplete-dropdown'}>
+                        {(() => {
+                          const list = data?.aqi || [];
+                          const filtered = list.filter(item =>
+                            item.city.toLowerCase().includes(aqiSearchQuery.toLowerCase()) ||
+                            item.country.toLowerCase().includes(aqiSearchQuery.toLowerCase())
+                          );
 
-                                if (filtered.length === 0) {
-                                  return (
-                                    <div className="p-3 text-[11px] font-sans text-text-secondary text-center">
-                                      No monitored cities match "{aqiSearchQuery}"
-                                    </div>
-                                  );
-                                }
+                          if (filtered.length === 0) {
+                            return (
+                              <div className="p-3 text-[13px] text-text-muted text-center">
+                                No monitored cities match "{aqiSearchQuery}"
+                              </div>
+                            );
+                          }
 
-                                return filtered.map(item => (
-                                  <button
-                                    key={item.city}
-                                    onClick={() => {
-                                      setSelectedCity(item.city);
-                                      setSelectedCountryCode(item.country === 'United States' ? 'US' : (MONITORED_CITIES.find(c => c.city === item.city)?.code || 'US'));
-                                      setAqiSearchQuery('');
-                                      setShowAqiSearchDropdown(false);
-                                    }}
-                                    className="w-full px-3 py-2 text-left hover:bg-surface-2 transition-colors flex items-center justify-between text-xs font-sans text-text-primary border-b border-border-hairline/30 last:border-0"
-                                  >
-                                    <div>
-                                      <p className="font-semibold text-text-primary">{item.city}</p>
-                                      <p className="text-[10px] text-text-secondary">{item.country}</p>
-                                    </div>
-                                    <div className="flex items-center gap-1.5">
-                                      <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: getAQILevelDetails(item.aqi).color }} />
-                                      <span className="font-mono text-[11px] text-text-muted font-medium font-semibold">AQI {item.aqi}</span>
-                                    </div>
-                                  </button>
-                                ));
-                              })()}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Quick-select chips */}
-                        <div className="flex items-center gap-1.5 max-w-full overflow-x-auto scrollbar-none py-1">
-                          {['New York', 'London', 'Tokyo', 'Delhi', 'Manila'].map(city => {
-                            const isSelected = selectedCity.toLowerCase() === city.toLowerCase();
+                          return filtered.map(item => {
+                            const t = aqiTone(getAQILevelDetails(item.aqi).status);
                             return (
                               <button
-                                key={city}
+                                key={item.city}
+                                onMouseDown={(e) => e.preventDefault()}
                                 onClick={() => {
-                                  setSelectedCity(city);
-                                  setSelectedCountryCode(MONITORED_CITIES.find(c => c.city === city)?.code || 'US');
+                                  setSelectedCity(item.city);
+                                  setSelectedCountryCode(item.country === 'United States' ? 'US' : (MONITORED_CITIES.find(c => c.city === item.city)?.code || 'US'));
+                                  setAqiSearchQuery('');
+                                  setShowAqiSearchDropdown(false);
                                 }}
-                                className={`px-2.5 py-1 rounded-full text-[10px] font-sans font-semibold transition-all cursor-pointer ${isSelected
-                                  ? 'bg-status-accent text-surface-1 shadow-xs font-extrabold'
-                                  : 'bg-surface-2 hover:bg-surface-2/70 text-text-secondary hover:text-text-primary border border-border-hairline/35'
-                                  }`}
+                                className="list-row justify-between min-h-11"
                               >
-                                {city}
+                                <span className="min-w-0">
+                                  <span className="block text-[14px] font-medium text-text-primary truncate">{item.city}</span>
+                                  <span className="block text-[12px] text-text-muted truncate">{item.country}</span>
+                                </span>
+                                <StatusBadge tone={t.tone} progress={t.progress}>AQI {item.aqi}</StatusBadge>
                               </button>
                             );
-                          })}
-                        </div>
+                          });
+                        })()}
                       </div>
-                    </div>
+                    )}
+                  </div>
+                );
 
-                    {/* Primary summary details row */}
-                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6" id="aqi-summary-breakdown-panel-row">
+                const aqiQuickCities = ['New York', 'London', 'Tokyo', 'Delhi', 'Manila'];
 
-                      {/* Left Column: Primary Summary Card */}
-                      <div
-                        className="lg:col-span-5 border border-border-strong rounded-3xl p-6 shadow-sm flex flex-col justify-between transition-all duration-300 relative overflow-hidden"
-                        style={{ borderTop: `4px solid ${details.color}` }}
-                        id="aqi-primary-hero-summary-card"
-                      >
-                        {/* Background subtle color shading matching AQI level */}
-                        <div className="absolute inset-0 opacity-[0.03] pointer-events-none" style={{ backgroundColor: details.color }} />
+                return (
+                  <>
+                    {/* ===== MOBILE (< 768px): hero + in-page section switcher ===== */}
+                    <div className="md:hidden flex flex-col gap-3" id="aqi-tab-mobile">
+                      {renderAqiSearch(true)}
 
-                        <div>
-                          <div className="flex items-start justify-between">
-                            <div>
-                              <p className="text-[10px] font-sans text-text-muted uppercase tracking-widest font-bold">Active Monitoring </p>
-                              <h3 className="font-sans font-semibold text-lg text-text-primary mt-1.5 flex items-center gap-2">
-                                <CountryFlag code={MONITORED_CITIES.find(c => c.city === activeAQI.city)?.code || 'US'} className="w-5 h-3.5 rounded-sm object-cover border border-border-hairline/50" />
-                                {activeAQI.city}, <span className="text-text-secondary text-sm font-medium font-semibold">{activeAQI.country}</span>
-                              </h3>
-                            </div>
-
-                            {/* Updated Timestamp */}
-                            <span className="text-[9px] font-arimo text-text-muted flex items-center gap-1">
-                              <PhosphorIcon name="clock" className="text-[10px]" />
-                              UPDATED {new Date(activeAQI.lastUpdated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </div>
-
-                          {/* Hero number & severity indicator */}
-                          <div className="flex items-baseline gap-4 mt-6">
-                            <span className="font-sans font-light text-6xl tracking-tighter text-text-primary tabular-nums">
-                              {activeAQI.aqi}
-                            </span>
-                            <div className="flex flex-col gap-1">
-                              <span className="text-[10px] font-arimo text-text-muted uppercase font-bold leading-none">Air Quality Index</span>
-                              <span
-                                className="px-2.5 py-1.5 rounded-xl text-xs font-sans font-bold leading-none inline-block border text-center mt-1"
-                                style={{
-                                  borderColor: `${details.color}35`,
-                                  backgroundColor: `${details.color}15`,
-                                  color: details.color
-                                }}
-                              >
-                                {details.status}
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* One-line health message */}
-                          <p className="text-xs md:text-[13px] font-sans text-text-secondary leading-relaxed mt-5 border-l-2 pl-3" style={{ borderLeftColor: details.color }}>
-                            {activeAQI.healthMessage}
-                          </p>
-                        </div>
-
-                        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border-hairline/45 mt-6 pt-4">
-                          {/* Main Pollutant driver */}
-                          <div className="flex items-center gap-1.5">
-                            <span className="w-1.5 h-1.5 rounded-full bg-status-accent" />
-                            <span className="text-[11px] font-sans text-text-secondary">
-                              Primary Pollutant: <span className="font-semibold text-text-primary">{activeAQI.mainPollutant}</span>
-                            </span>
-                          </div>
-
-                          {/* Trend Arrow */}
-                          <div className={`flex items-center gap-1 text-[11px] font-sans font-semibold ${trendInfo.color}`}>
-                            <PhosphorIcon name={trendInfo.icon} className="text-sm" />
-                            <span>{trendInfo.text}</span>
-                          </div>
-                        </div>
+                      {/* Quick-select chips */}
+                      <div className="flex items-center gap-2 overflow-x-auto scrollbar-none" aria-label="Quick select city">
+                        {aqiQuickCities.map(city => {
+                          const isSelected = selectedCity.toLowerCase() === city.toLowerCase();
+                          return (
+                            <button
+                              key={city}
+                              onClick={() => aqiSelectCity(city)}
+                              className={`h-10 px-3.5 rounded-full text-[14px] font-medium shrink-0 border transition-colors ${isSelected ? 'bg-text-primary text-surface-0 border-text-primary' : 'bg-surface-1 text-text-secondary border-border-hairline'}`}
+                              aria-pressed={isSelected}
+                            >
+                              {city}
+                            </button>
+                          );
+                        })}
                       </div>
 
-                      {/* Right Column: Pollutants breakdown grid */}
-                      <div className="lg:col-span-7 border border-border-hairline rounded-3xl bg-surface-1 p-6 shadow-sm" id="aqi-pollutants-grid-panel">
-                        <div className="flex items-center justify-between border-b border-border-hairline/65 pb-3.5 mb-5">
-                          <div>
-                            <h4 className="font-sans font-semibold text-sm text-text-primary">
-                              Component Concentrations
-                            </h4>
-                            <p className="text-[11px] font-sans text-text-secondary mt-0.5">
-                              Hover on pollutant cards for official scientific definitions and respiratory impact details.
-                            </p>
-                          </div>
+                      {/* Hero: AQI value + level + one-line advice */}
+                      <section className="card card-pad" id="aqi-mobile-hero-card">
+                        <div className="flex items-center justify-between gap-3">
+                          <h2 className="text-[16px] font-semibold text-text-primary flex items-center gap-2 min-w-0">
+                            <CountryFlag code={aqiCityCode} className="w-5 h-3.5 rounded-sm object-cover border border-border-hairline/50 shrink-0" />
+                            <span className="truncate">{activeAQI.city}<span className="font-normal text-text-secondary">, {activeAQI.country}</span></span>
+                          </h2>
+                          <span className="text-[12px] text-text-muted shrink-0 tabular-nums">{aqiUpdated}</span>
+                        </div>
 
-                          <span className="text-[10px] font-mono text-text-muted bg-surface-2 px-2.5 py-0.5 rounded-full border border-border-hairline/40">
-                            6-Factor Sensor Feed
+                        <div className="flex items-end gap-3 mt-3">
+                          <span className="stat-hero text-[48px]">{activeAQI.aqi}</span>
+                          <div className="flex flex-col gap-1 pb-1 min-w-0">
+                            <span className="text-[12px] text-text-muted">US AQI</span>
+                            <StatusBadge tone={aqiLevel.tone} progress={aqiLevel.progress} size="md">{aqiShortLabel(details.status)}</StatusBadge>
+                          </div>
+                        </div>
+
+                        <div className="mt-3">
+                          <AqiScaleBar aqi={activeAQI.aqi} />
+                        </div>
+
+                        <p className="text-[14px] text-text-secondary leading-snug mt-3">{aqiAdvice}</p>
+
+                        <div className="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-border-hairline text-[13px]">
+                          <span className="text-text-secondary">Main pollutant <span className="font-semibold text-text-primary">{activeAQI.mainPollutant}</span></span>
+                          <span className={`flex items-center gap-1 font-medium ${trendInfo.color}`}>
+                            <PhosphorIcon name={trendInfo.icon} size={15} className="" />
+                            {trendInfo.short}
                           </span>
                         </div>
+                      </section>
 
-                        {/* 6 Grid cards */}
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 md:gap-4 relative">
-                          {Object.entries(pollutantDefinitions).map(([key, def]) => {
-                            // Extract concentration value from activeAQI
-                            const val = (activeAQI.pollutants as any)?.[key] || (activeAQI as any)[key] || 0;
-                            const sev = getPollutantSeverityColorLocal(key, val);
-
-                            return (
-                              <div
-                                key={key}
-                                className="group relative bg-surface-2 border border-border-hairline hover:border-border-strong p-3.5 rounded-2xl flex flex-col justify-between h-24 transition-all duration-150"
-                              >
-                                <div className="flex items-start justify-between gap-1">
-                                  {/* Pollutant Name with standard custom tooltip trigger */}
-                                  <div className="flex items-center gap-1 text-[11px] font-sans font-bold text-text-secondary">
-                                    <span>{def.label}</span>
-                                    <span className="text-[10px] text-text-muted opacity-45 group-hover:opacity-100 transition-opacity cursor-help">
-                                      <PhosphorIcon name="info" className="text-[10px]" />
-                                    </span>
-                                  </div>
-
-                                  {/* Small color status bullet dot or mini pill */}
-                                  <span
-                                    className="px-1.5 py-0.5 text-[9px] font-mono font-bold rounded-md uppercase"
-                                    style={{
-                                      backgroundColor: `${sev.color}15`,
-                                      color: sev.color
-                                    }}
-                                  >
-                                    {sev.label}
-                                  </span>
-                                </div>
-
-                                <div className="mt-2.5">
-                                  <p className="font-sans font-extrabold text-sm md:text-base text-text-primary tabular-nums tracking-tight font-semibold">
-                                    {val} <span className="text-[10px] font-normal text-text-muted font-sans ml-0.5">{def.unit}</span>
-                                  </p>
-                                </div>
-
-                                {/* Modern Hover Floating Definition Tooltip Card */}
-                                <div className="pointer-events-none opacity-0 group-hover:opacity-100 transition-all duration-200 absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 bg-surface-1 border border-border-strong p-3 rounded-2xl shadow-xl z-50">
-                                  <div className="flex items-center gap-1.5 mb-1.5">
-                                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: sev.color }} />
-                                    <h5 className="text-[11px] font-sans font-bold text-text-primary">{def.label} — {sev.label}</h5>
-                                  </div>
-                                  <p className="text-[10px] font-sans text-text-secondary leading-relaxed font-normal">
-                                    {def.desc}
-                                  </p>
-                                  <p className="text-[9px] font-mono text-text-muted mt-2 border-t border-border-hairline/45 pt-1.5">
-                                    Concentration: {val} {def.unit}
-                                  </p>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
+                      {/* Section switcher */}
+                      <div className="segmented segmented-full [&>button]:px-1" role="group" aria-label="Air quality sections">
+                        {([
+                          ['overview', 'Overview'],
+                          ['pollutants', 'Pollutants'],
+                          ['history', 'History'],
+                          ['map', 'Map'],
+                        ] as const).map(([id, label]) => (
+                          <button key={id} aria-pressed={aqiMobileSection === id} onClick={() => setAqiMobileSection(id)}>
+                            {label}
+                          </button>
+                        ))}
                       </div>
+
+                      {aqiMobileSection === 'overview' && (
+                        <AqiHealthGuidance aqi={activeAQI.aqi} status={details.status} className="animate-fade-in" />
+                      )}
+
+                      {aqiMobileSection === 'pollutants' && (
+                        <section className="card card-pad animate-fade-in" id="aqi-mobile-pollutants">
+                          <h3 className="card-title">Pollutants</h3>
+                          <p className="card-subtitle">Tap a pollutant to see what it is</p>
+                          <div className="grid grid-cols-2 gap-2.5 mt-3">
+                            {aqiPollutants.map(p => (
+                              <button
+                                key={p.key}
+                                onClick={() => setAqiPollutantInfo(p.key)}
+                                aria-pressed={aqiInfoPollutant.key === p.key}
+                                className={`text-left rounded-xl border p-3 min-h-[76px] flex flex-col justify-between gap-1.5 transition-colors ${aqiInfoPollutant.key === p.key ? 'bg-surface-1 border-border-strong shadow-xs' : 'bg-surface-2 border-transparent'}`}
+                              >
+                                <span className="flex flex-wrap items-center justify-between gap-1.5">
+                                  <span className="text-[13px] font-semibold text-text-secondary">{p.def.label.replace(' (Ozone)', '')}</span>
+                                  <StatusBadge tone={p.tone.tone} progress={null}>{p.sev.label}</StatusBadge>
+                                </span>
+                                <span className="text-[17px] font-semibold text-text-primary tabular-nums leading-none">
+                                  {p.val} <span className="text-[12px] font-normal text-text-muted">{p.def.unit}</span>
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                          <div className="mt-3 rounded-xl bg-surface-2 p-3">
+                            <p className="text-[13px] font-semibold text-text-primary">{aqiInfoPollutant.def.label} · {aqiInfoPollutant.val} {aqiInfoPollutant.def.unit}</p>
+                            <p className="text-[13px] text-text-secondary leading-snug mt-0.5">{aqiInfoPollutant.def.desc}</p>
+                          </div>
+                        </section>
+                      )}
+
+                      {aqiMobileSection === 'history' && (
+                        <div className="animate-fade-in">
+                          <AQITrendChart trendData={activeAQI.trend} city={activeAQI.city} compact />
+                        </div>
+                      )}
+
+                      {aqiMobileSection === 'map' && (
+                        <section className="card card-pad animate-fade-in" id="aqi-mobile-map">
+                          <div className="flex items-start justify-between gap-3 mb-3">
+                            <div>
+                              <h3 className="card-title">World map</h3>
+                              <p className="card-subtitle">Tap a station to switch city</p>
+                            </div>
+                            <StatusBadge tone="success" progress="complete">Live</StatusBadge>
+                          </div>
+                          <MapPanel
+                            onSelectCity={aqiSelectCity}
+                            selectedCity={selectedCity}
+                            weatherData={data.weather}
+                            aqiData={data.aqi}
+                            tempUnit={tempUnit}
+                            compact
+                          />
+                        </section>
+                      )}
                     </div>
 
-                    {/* History Trend + Info Section */}
-                    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6" id="aqi-trend-explanation-row">
-                      {/* Trend area */}
-                      <div className="lg:col-span-8">
-                        <AQITrendChart trendData={activeAQI.trend} city={activeAQI.city} />
+                    {/* ===== TABLET & DESKTOP (>= 768px) ===== */}
+                    <div className="hidden md:flex flex-col gap-6" id="aqi-tab-desktop">
+                      {/* City picker toolbar */}
+                      <div className="flex flex-wrap items-center justify-between gap-3" id="aqi-filter-panel-row">
+                        {renderAqiSearch(false)}
+                        <div className="segmented max-w-full overflow-x-auto scrollbar-none" aria-label="Quick select city">
+                          {aqiQuickCities.map(city => (
+                            <button
+                              key={city}
+                              onClick={() => aqiSelectCity(city)}
+                              aria-pressed={selectedCity.toLowerCase() === city.toLowerCase()}
+                              className="shrink-0"
+                            >
+                              {city}
+                            </button>
+                          ))}
+                        </div>
                       </div>
 
-                      {/* Info & standards area */}
-                      <div className="lg:col-span-4 border border-border-hairline rounded-3xl bg-surface-1 p-5 shadow-sm flex flex-col justify-between" id="aqi-standards-card">
-                        <div>
-                          <div className="flex items-center gap-1.5 border-b border-border-hairline pb-3">
-                            <PhosphorIcon name="info" className="text-sm text-status-accent" />
-                            <h4 className="font-sans font-semibold text-sm text-text-primary">
-                              EPA Exposure Standards
-                            </h4>
+                      {/* Summary + pollutants */}
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6" id="aqi-summary-breakdown-panel-row">
+                        <section className="lg:col-span-5 card card-pad md:p-6 flex flex-col" id="aqi-primary-hero-summary-card">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="eyebrow">Air quality now</p>
+                              <h2 className="text-xl font-semibold text-text-primary mt-1 flex items-center gap-2 min-w-0">
+                                <CountryFlag code={aqiCityCode} className="w-5 h-3.5 rounded-sm object-cover border border-border-hairline/50 shrink-0" />
+                                <span className="truncate">{activeAQI.city}<span className="font-normal text-text-secondary">, {activeAQI.country}</span></span>
+                              </h2>
+                            </div>
+                            <span className="text-[13px] text-text-muted flex items-center gap-1 shrink-0 tabular-nums">
+                              <PhosphorIcon name="clock" size={14} className="" />
+                              Updated {aqiUpdated}
+                            </span>
                           </div>
 
-                          <div className="space-y-3.5 mt-4 text-xs font-sans text-text-secondary leading-relaxed">
-                            <p>
-                              The US EPA Air Quality Index (AQI) is a unified scale from 0 to 500 used to report daily air cleanliness levels.
-                            </p>
-
-                            <div className="space-y-2 mt-2">
-                              <div className="flex gap-2">
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mt-1.5 shrink-0" />
-                                <div>
-                                  <span className="font-bold text-text-primary">0-50 (Good):</span> Air quality is posing virtually zero risk to health.
-                                </div>
-                              </div>
-                              <div className="flex gap-2">
-                                <span className="w-1.5 h-1.5 rounded-full bg-yellow-400 mt-1.5 shrink-0" />
-                                <div>
-                                  <span className="font-bold text-text-primary">51-100 (Moderate):</span> Safe for public, extremely sensitive people should monitor.
-                                </div>
-                              </div>
-                              <div className="flex gap-2">
-                                <span className="w-1.5 h-1.5 rounded-full bg-orange-400 mt-1.5 shrink-0" />
-                                <div>
-                                  <span className="font-bold text-text-primary">101-150 (USG):</span> Sensitive groups may experience irritation.
-                                </div>
-                              </div>
-                              <div className="flex gap-2">
-                                <span className="w-1.5 h-1.5 rounded-full bg-red-400 mt-1.5 shrink-0" />
-                                <div>
-                                  <span className="font-bold text-text-primary">151+ (Unhealthy+):</span> Everyone may begin experiencing general lung strain.
-                                </div>
-                              </div>
+                          <div className="flex items-end gap-4 mt-6">
+                            <span className="text-7xl font-semibold tracking-[-0.03em] text-text-primary tabular-nums leading-none">
+                              {activeAQI.aqi}
+                            </span>
+                            <div className="flex flex-col gap-1.5 pb-1">
+                              <span className="text-[13px] text-text-muted">US AQI</span>
+                              <StatusBadge tone={aqiLevel.tone} progress={aqiLevel.progress} size="md">{aqiShortLabel(details.status)}</StatusBadge>
                             </div>
                           </div>
-                        </div>
 
-                        <div className="bg-surface-2 p-3 rounded-2xl border border-border-hairline/40 mt-4">
-                          <p className="text-[10px] font-mono text-text-muted uppercase font-bold leading-none">Public Advisory</p>
-                          <p className="text-[11px] text-text-secondary leading-relaxed mt-1.5 font-sans">
-                            If AQI exceeds 100, asthma patients and active children are advised to restrict heavy outdoor exercises and close windows.
-                          </p>
+                          <div className="mt-5">
+                            <AqiScaleBar aqi={activeAQI.aqi} showTicks />
+                          </div>
+
+                          <p className="text-[15px] text-text-secondary leading-relaxed mt-5">{aqiAdvice}</p>
+
+                          <dl className="grid grid-cols-2 gap-3 mt-auto pt-5">
+                            <div className="rounded-xl bg-surface-2 p-3">
+                              <dt className="stat-label">Main pollutant</dt>
+                              <dd className="stat-value mt-0.5">{activeAQI.mainPollutant}</dd>
+                            </div>
+                            <div className="rounded-xl bg-surface-2 p-3">
+                              <dt className="stat-label">Last 4 hours</dt>
+                              <dd className={`text-[15px] font-semibold mt-1 flex items-center gap-1 ${trendInfo.color}`}>
+                                <PhosphorIcon name={trendInfo.icon} size={16} className="" />
+                                {trendInfo.short.replace(' in 4h', '')}
+                              </dd>
+                            </div>
+                          </dl>
+                        </section>
+
+                        <section className="lg:col-span-7 card card-pad md:p-6" id="aqi-pollutants-grid-panel">
+                          <div className="flex items-start justify-between gap-3 mb-4">
+                            <div>
+                              <h3 className="card-title">Pollutants</h3>
+                              <p className="card-subtitle">Hover or focus a pollutant to see what it is and how it affects health</p>
+                            </div>
+                            <StatusBadge tone="neutral" progress={null}>6 sensors</StatusBadge>
+                          </div>
+
+                          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+                            {aqiPollutants.map(p => (
+                              <div
+                                key={p.key}
+                                tabIndex={0}
+                                className="group relative rounded-xl bg-surface-2 border border-transparent hover:border-border-hairline focus:border-border-strong focus:outline-none p-4 flex flex-col gap-3 transition-colors"
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-[13px] font-semibold text-text-secondary flex items-center gap-1">
+                                    {p.def.label}
+                                    <PhosphorIcon name="info" size={13} className="text-text-muted" />
+                                  </span>
+                                  <StatusBadge tone={p.tone.tone} progress={p.tone.progress}>{p.sev.label}</StatusBadge>
+                                </div>
+                                <p className="text-[22px] font-semibold text-text-primary tabular-nums tracking-tight leading-none">
+                                  {p.val} <span className="text-[13px] font-normal text-text-muted">{p.def.unit}</span>
+                                </p>
+
+                                {/* Definition tooltip (hover / keyboard focus) */}
+                                <div className="pointer-events-none opacity-0 group-hover:opacity-100 group-focus:opacity-100 transition-opacity duration-150 absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 bg-surface-1 border border-border-hairline p-3 rounded-xl shadow-lg z-50">
+                                  <p className="text-[13px] font-semibold text-text-primary">{p.def.label} · {p.sev.label}</p>
+                                  <p className="text-[13px] text-text-secondary leading-snug mt-1">{p.def.desc}</p>
+                                  <p className="text-[12px] text-text-muted mt-2 pt-2 border-t border-border-hairline tabular-nums">
+                                    Concentration: {p.val} {p.def.unit}
+                                  </p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </section>
+                      </div>
+
+                      {/* History + health guidance */}
+                      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6" id="aqi-trend-explanation-row">
+                        <div className="lg:col-span-8 min-w-0">
+                          <AQITrendChart trendData={activeAQI.trend} city={activeAQI.city} />
+                        </div>
+                        <div className="lg:col-span-4">
+                          <AqiHealthGuidance aqi={activeAQI.aqi} status={details.status} className="h-full" />
                         </div>
                       </div>
-                    </div>
 
-                    {/* Central Map area */}
-                    <div className="w-full flex flex-col gap-3 mt-2" id="global-map-full-width-wrapper">
-                      <div className="flex items-center justify-between mb-1">
-                        <div>
-                          <h4 className="font-sans font-semibold text-sm text-text-primary flex items-center gap-1.5">
-                            <span className="w-1.5 h-1.5 rounded-full bg-status-accent animate-pulse" />
-                            Air Quality World Map
-                          </h4>
-                          <p className="text-[11px] font-sans text-text-secondary mt-0.5">
-                            Interactive visual overview of registered global reporting stations. Click on pins to sync dashboard focus.
-                          </p>
+                      {/* World map */}
+                      <section className="card card-pad md:p-6" id="global-map-full-width-wrapper">
+                        <div className="flex items-start justify-between gap-3 mb-4">
+                          <div>
+                            <h3 className="card-title flex items-center gap-2">
+                              Air quality world map
+                              <StatusBadge tone="success" progress="complete">Live</StatusBadge>
+                            </h3>
+                            <p className="card-subtitle">Live readings from {data.aqi?.length ?? 0} monitored cities. Select a city to see its details.</p>
+                          </div>
                         </div>
-                      </div>
-
-                      <MapPanel
-                        onSelectCity={(city) => { setSelectedCity(city); setSelectedCountryCode(MONITORED_CITIES.find(c => c.city === city)?.code || 'US'); }}
-                        selectedCity={selectedCity}
-                        weatherData={data.weather}
-                        aqiData={data.aqi}
-                        tempUnit={tempUnit}
-                      />
+                        <MapPanel
+                          onSelectCity={aqiSelectCity}
+                          selectedCity={selectedCity}
+                          weatherData={data.weather}
+                          aqiData={data.aqi}
+                          tempUnit={tempUnit}
+                        />
+                      </section>
                     </div>
                   </>
                 );
@@ -4625,282 +4472,384 @@ export default function App() {
           )}
 
           {/* ==================== TAB 6: COUNTRIES COMPARISON ==================== */}
-          {activeTab === 'countries' && (
+          {activeTab === 'countries' && (() => {
+            const countriesAll = data.countries || [];
+            const countriesQuery = countrySearchQuery.trim().toLowerCase();
+            const countriesFiltered = countriesAll.filter((c) =>
+              c.name.toLowerCase().includes(countriesQuery) ||
+              c.region.toLowerCase().includes(countriesQuery)
+            );
+            const countriesDesktopShown = countriesQuery
+              ? countriesFiltered
+              : countriesFiltered.slice(0, countryVisibleCount);
+            const countriesMobileShown = countriesQuery || countriesMobileShowAll
+              ? countriesFiltered
+              : countriesFiltered.slice(0, 5);
+
+            const countriesPick = (code: string) => {
+              setSelectedCountryCode(code);
+              setSelectedCity(MONITORED_CITIES.find(cityObj => cityObj.code === code)?.city || 'New York');
+            };
+
+            const countriesFmtPopulation = (n?: number) => {
+              if (!n) return '—';
+              return n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : `${(n / 1e6).toFixed(1)}M`;
+            };
+            const countriesFmtGdp = (n?: number) => {
+              if (!n) return '—';
+              return n >= 1e12 ? `$${(n / 1e12).toFixed(1)}T` : `$${(n / 1e9).toFixed(0)}B`;
+            };
+
+            const countriesGdpSeries = [...(activeCountry?.historicalGdp || [])].sort((a, b) => Number(a.year) - Number(b.year));
+            const countriesGdpFirst = countriesGdpSeries[0];
+            const countriesGdpLast = countriesGdpSeries[countriesGdpSeries.length - 1];
+            const countriesGdpChange =
+              countriesGdpFirst && countriesGdpLast && countriesGdpFirst.gdp > 0 && countriesGdpSeries.length > 1
+                ? ((countriesGdpLast.gdp - countriesGdpFirst.gdp) / countriesGdpFirst.gdp) * 100
+                : null;
+            const countriesGdpRange = countriesGdpFirst && countriesGdpLast
+              ? `${countriesGdpFirst.year}–${countriesGdpLast.year}`
+              : 'No history yet';
+
+            const countriesLivability = activeCountry?.livabilityIndex ?? 0;
+            const countriesLivabilityTone: 'success' | 'info' | 'warning' =
+              countriesLivability >= 80 ? 'success' : countriesLivability >= 60 ? 'info' : 'warning';
+            const countriesLivabilityLabel =
+              countriesLivability >= 80 ? 'High' : countriesLivability >= 60 ? 'Moderate' : 'Low';
+            const countriesLivabilityBar =
+              countriesLivabilityTone === 'success' ? 'bg-status-success' : countriesLivabilityTone === 'info' ? 'bg-status-info' : 'bg-status-warning';
+
+            const countriesGdpBadge = countriesGdpChange !== null && countriesGdpFirst ? (
+              <StatusBadge tone={countriesGdpChange >= 0 ? 'success' : 'critical'} progress={null}>
+                {countriesGdpChange >= 0 ? '+' : ''}{countriesGdpChange.toFixed(1)}% since {countriesGdpFirst.year}
+              </StatusBadge>
+            ) : null;
+
+            const countriesSearchField = (autoFocus?: boolean) => (
+              <div className="relative">
+                <span className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-text-muted">
+                  <MagnifyingGlass size={16} />
+                </span>
+                <input
+                  type="search"
+                  value={countrySearchQuery}
+                  onChange={(e) => setCountrySearchQuery(e.target.value)}
+                  placeholder="Search country or region"
+                  aria-label="Search countries"
+                  autoFocus={autoFocus}
+                  className="w-full h-10 pl-9 pr-10 bg-surface-1 border border-border-hairline rounded-lg text-[14px] text-text-primary placeholder:text-text-muted focus:outline-none focus:border-border-strong transition-colors [&::-webkit-search-cancel-button]:hidden"
+                />
+                {countrySearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setCountrySearchQuery('')}
+                    aria-label="Clear search"
+                    className="absolute inset-y-0 right-0 w-10 flex items-center justify-center text-text-muted hover:text-text-primary cursor-pointer"
+                  >
+                    <X size={15} />
+                  </button>
+                )}
+              </div>
+            );
+
+            const countriesRow = (c: typeof countriesAll[number], onPick: () => void) => {
+              const isSelected = c.code === selectedCountryCode;
+              return (
+                <button
+                  type="button"
+                  key={c.code}
+                  role="option"
+                  aria-selected={isSelected}
+                  onClick={onPick}
+                  className="list-row min-h-12"
+                >
+                  <CountryFlag code={c.code} className="w-8 h-6 rounded shadow-2xs shrink-0 object-cover" />
+                  <span className="flex-1 min-w-0">
+                    <span className={`block text-[14px] truncate ${isSelected ? 'font-semibold text-text-primary' : 'font-medium text-text-primary'}`}>{c.name}</span>
+                    <span className="block text-[13px] text-text-muted truncate">{c.region}</span>
+                  </span>
+                  {isSelected && <CheckCircle size={18} weight="fill" className="text-accent shrink-0" aria-hidden="true" />}
+                </button>
+              );
+            };
+
+            const countriesEmpty = (
+              <div className="py-8 px-4 text-center">
+                <p className="text-[14px] font-medium text-text-primary">No countries found</p>
+                <p className="text-[13px] text-text-muted mt-1">Nothing matches “{countrySearchQuery}”.</p>
+                <button type="button" onClick={() => setCountrySearchQuery('')} className="btn btn-secondary btn-sm mt-3">
+                  Clear search
+                </button>
+              </div>
+            );
+
+            const countriesTags = (activeCountry?.tags || []).map((tag, idx) => (
+              <React.Fragment key={idx}><StatusBadge tone="neutral" progress={null}>{tag}</StatusBadge></React.Fragment>
+            ));
+
+            return (
             <>
-              {/* MOBILE ONLY VIEW (viewport <= 480px) */}
-              <div className="block min-[481px]:hidden space-y-4 animate-slide-up" id="countries-tab-mobile">
-                {/* Detail Card */}
-                <div className="border border-border-hairline border-t-2 border-t-status-accent rounded-3xl bg-surface-1 p-5 shadow-xs flex flex-col justify-between" id="countries-mobile-detail-card">
-                  <div>
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <span className="font-mono text-[9px] text-status-accent uppercase tracking-widest font-semibold block">World Bank Sovereign Indicators</span>
-                        <h2 className="font-sans font-medium text-xl tracking-tight text-text-primary mt-1 flex items-center gap-2">
-                          <CountryFlag code={activeCountry?.code || ''} className="w-7 h-5 rounded shadow-2xs shrink-0" />
-                          <span>{activeCountry?.name}</span>
-                        </h2>
-                        <span className="font-sans text-[10px] text-text-secondary mt-1 block">Capital: {activeCountry?.capital}</span>
-                      </div>
-
-                      {/* Sovereigns List Switcher Button/Chip */}
-                      <button
-                        onClick={() => setMobileCountriesOpen(true)}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-surface-2 border border-border-hairline hover:border-border-strong rounded-full text-xs font-medium text-text-primary cursor-pointer transition-colors shrink-0"
-                        id="sovereigns-locations-trigger-mobile"
-                      >
-                        <Compass size={12} />
-                        <span className="text-[10px] font-medium">Sovereigns list ▾</span>
-                      </button>
-                    </div>
-
-                    {/* Wrapped tag line */}
-                    <div className="flex flex-wrap gap-1 mt-3">
-                      {activeCountry?.tags.map((tag, idx) => (
-                        <span key={idx} className="px-2 py-0.5 rounded-full text-[9px] font-mono bg-status-indigo-bg text-status-indigo">
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
+              {/* MOBILE VIEW (< 768px): identity card + Profile | Growth | Countries switcher */}
+              <div className="md:hidden flex flex-col gap-3 animate-slide-up" id="countries-tab-mobile">
+                {/* Selected country identity */}
+                <div className="card card-pad flex items-center gap-3" id="countries-mobile-detail-card">
+                  <CountryFlag code={activeCountry?.code || ''} className="w-11 h-8 rounded-md shadow-2xs shrink-0 object-cover" />
+                  <div className="flex-1 min-w-0">
+                    <h2 className="text-[18px] font-semibold tracking-tight text-text-primary truncate">{activeCountry?.name}</h2>
+                    <p className="text-[13px] text-text-secondary truncate">{activeCountry?.capital} · {activeCountry?.region}</p>
                   </div>
-
-                  {/* Key Stats Row (Horizontally Scrollable) */}
-                  <div className="mt-5 pt-4 border-t border-border-hairline/40">
-                    <div className="flex gap-3 overflow-x-auto pb-1.5 scrollbar-none snap-x snap-mandatory pr-1" id="countries-mobile-stats-row">
-                      {/* Stat 1: Population */}
-                      <div className="flex-shrink-0 w-[110px] border border-border-hairline rounded-2xl bg-surface-2/50 p-3 flex flex-col justify-between snap-start">
-                        <span className="text-[9px] text-text-secondary font-medium uppercase tracking-wider">Population</span>
-                        <span className="text-xs font-semibold text-text-primary mt-1">{(activeCountry?.population / 1e6).toFixed(1)}M</span>
-                      </div>
-
-                      {/* Stat 2: Nominal GDP */}
-                      <div className="flex-shrink-0 w-[110px] border border-border-hairline rounded-2xl bg-surface-2/50 p-3 flex flex-col justify-between snap-start">
-                        <span className="text-[9px] text-text-secondary font-medium uppercase tracking-wider">Nominal GDP</span>
-                        <span className="text-xs font-semibold text-text-primary mt-1">${(activeCountry?.gdp / 1e12).toFixed(1)}T</span>
-                      </div>
-
-                      {/* Stat 3: Languages */}
-                      <div className="flex-shrink-0 w-[130px] border border-border-hairline rounded-2xl bg-surface-2/50 p-3 flex flex-col justify-between snap-start">
-                        <span className="text-[9px] text-text-secondary font-medium uppercase tracking-wider">Languages</span>
-                        <span className="text-xs font-semibold text-text-primary mt-1 truncate block">{activeCountry?.languages?.join(', ')}</span>
-                      </div>
-
-                      {/* Compact Livability score as a small ring/badge inside key stats row */}
-                      <div className="flex-shrink-0 w-[150px] border border-border-hairline rounded-2xl bg-surface-2/50 p-3 flex items-center gap-2.5 snap-start">
-                        <div className="relative w-9 h-9 flex items-center justify-center shrink-0">
-                          <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
-                            <circle cx="18" cy="18" r="14" fill="none" stroke="var(--line)" strokeWidth="3" className="opacity-30" />
-                            <circle
-                              cx="18"
-                              cy="18"
-                              r="14"
-                              fill="none"
-                              stroke="var(--purple)"
-                              strokeWidth="3"
-                              strokeDasharray={2 * Math.PI * 14}
-                              strokeDashoffset={2 * Math.PI * 14 - ((activeCountry?.livabilityIndex || 75) / 100) * 2 * Math.PI * 14}
-                              strokeLinecap="round"
-                            />
-                          </svg>
-                          <span className="absolute font-sans font-bold text-[9px] text-text-primary">
-                            {activeCountry?.livabilityIndex}
-                          </span>
-                        </div>
-                        <div>
-                          <p className="text-[8px] font-mono text-text-secondary uppercase leading-none font-semibold">Livability</p>
-                          <p className="text-[10px] font-sans font-medium text-text-muted mt-0.5">{activeCountry?.livabilityIndex} pts rating</p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setMobileCountriesOpen(true)}
+                    className="btn btn-secondary h-10 px-3 shrink-0"
+                    id="sovereigns-locations-trigger-mobile"
+                    aria-label="Change country"
+                  >
+                    <Compass size={16} />
+                    <span>Change</span>
+                  </button>
                 </div>
 
-                {/* GDP growth trend chart: full width of the card, static flat line */}
-                <div className="border border-border-hairline rounded-3xl bg-surface-1 p-4 shadow-xs" id="countries-mobile-chart-card">
-                  <div className="mb-3">
-                    <h3 className="font-sans font-medium text-xs text-text-primary tracking-tight">GDP Growth Index Trend (World Bank Indicator)</h3>
-                    <p className="text-[9px] text-text-secondary mt-0.5">Historical economic growth performance</p>
+                {/* In-page section switcher */}
+                <div className="segmented segmented-full [&>button]:h-10" role="group" aria-label="Country sections">
+                  {([
+                    { value: 'profile', label: 'Profile' },
+                    { value: 'growth', label: 'Growth' },
+                    { value: 'list', label: 'Countries' },
+                  ] as const).map((tab) => (
+                    <button
+                      key={tab.value}
+                      type="button"
+                     
+                      aria-selected={countriesMobileSection === tab.value}
+                      aria-pressed={countriesMobileSection === tab.value}
+                      onClick={() => setCountriesMobileSection(tab.value)}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                {countriesMobileSection === 'profile' && (
+                  <div className="card overflow-hidden" id="countries-mobile-profile">
+                    <div className="grid grid-cols-2 gap-px bg-border-hairline" id="countries-mobile-stats-row">
+                      <div className="bg-surface-1 p-4">
+                        <p className="stat-label">Population</p>
+                        <p className="stat-value mt-1">{countriesFmtPopulation(activeCountry?.population)}</p>
+                      </div>
+                      <div className="bg-surface-1 p-4">
+                        <p className="stat-label">GDP (nominal)</p>
+                        <p className="stat-value mt-1">{countriesFmtGdp(activeCountry?.gdp)}</p>
+                      </div>
+                      <div className="bg-surface-1 p-4">
+                        <p className="stat-label">Languages</p>
+                        <p className="text-[15px] font-semibold text-text-primary mt-1 leading-snug line-clamp-2">{activeCountry?.languages?.join(', ') || '—'}</p>
+                      </div>
+                      <div className="bg-surface-1 p-4">
+                        <p className="stat-label">Livability</p>
+                        <p className="stat-value mt-1">
+                          {countriesLivability}
+                          <span className="text-[13px] font-medium text-text-muted"> / 100</span>
+                        </p>
+                        <div className="mt-2 h-1.5 rounded-full bg-surface-3 overflow-hidden" aria-hidden="true">
+                          <div className={`h-full rounded-full ${countriesLivabilityBar}`} style={{ width: `${Math.min(100, Math.max(0, countriesLivability))}%` }} />
+                        </div>
+                      </div>
+                    </div>
+                    {countriesTags.length > 0 && (
+                      <div className="px-4 py-3 border-t border-border-hairline flex flex-wrap gap-1.5">
+                        <StatusBadge tone={countriesLivabilityTone} progress="complete">{countriesLivabilityLabel} livability</StatusBadge>
+                        {countriesTags}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setCountriesMobileSection('growth')}
+                      className="w-full min-h-12 px-4 border-t border-border-hairline flex items-center justify-between gap-3 text-left hover:bg-surface-2 transition-colors cursor-pointer"
+                    >
+                      <span className="min-w-0">
+                        <span className="block text-[14px] font-medium text-text-primary">GDP growth</span>
+                        <span className="block text-[13px] text-text-muted truncate">{countriesGdpRange}</span>
+                      </span>
+                      <span className="flex items-center gap-2 shrink-0">
+                        {countriesGdpBadge}
+                        <CaretRight size={16} className="text-text-muted" />
+                      </span>
+                    </button>
                   </div>
-                  <div className="h-[170px] w-full">
+                )}
+
+                {countriesMobileSection === 'growth' && (
+                  <div className="card card-pad" id="countries-mobile-chart-card">
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div className="min-w-0">
+                        <h3 className="card-title">GDP growth</h3>
+                        <p className="card-subtitle">World Bank · {countriesGdpRange}</p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="stat-value">{countriesFmtGdp(countriesGdpLast?.gdp)}</p>
+                        {countriesGdpLast && <p className="text-[12px] text-text-muted">in {countriesGdpLast.year}</p>}
+                      </div>
+                    </div>
+                    {countriesGdpBadge && <div className="mb-2">{countriesGdpBadge}</div>}
                     <CountryGrowthChart
                       data={activeCountry?.historicalGdp || []}
                       type="gdp"
                       countryName={activeCountry?.name || 'Sovereign'}
                       flatStroke={true}
+                      heightClass="h-[190px]"
                     />
                   </div>
-                </div>
-              </div>
+                )}
 
-              {/* DESKTOP & TABLET VIEW (viewport > 480px) */}
-              <div className="hidden min-[481px]:grid grid-cols-1 lg:grid-cols-12 gap-6 animate-slide-up" id="countries-tab-view">
-
-                {/* Left Column list (Country ranks) — Span 3 */}
-                <div className="lg:col-span-3 border border-border-hairline rounded-3xl bg-surface-1 p-5 shadow-sm flex flex-col gap-4">
-                  <div className="flex items-center justify-between border-b border-border-hairline pb-3">
-                    <h3 className="font-sans font-semibold text-xs uppercase tracking-wider text-text-secondary">Sovereigns List</h3>
-                    <span className="font-mono text-[9px] text-text-secondary">{data.countries ? `${data.countries.length} countries` : 'Ranked'}</span>
-                  </div>
-
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none text-text-secondary">
-                      <PhosphorIcon name="search" className="text-xs" />
+                {countriesMobileSection === 'list' && (
+                  <div className="card card-pad flex flex-col gap-3" id="countries-mobile-list">
+                    <div className="flex items-baseline justify-between">
+                      <h3 className="card-title">All countries</h3>
+                      <span className="text-[13px] text-text-muted tabular-nums">{countriesFiltered.length} of {countriesAll.length}</span>
                     </div>
-                    <input
-                      type="text"
-                      value={countrySearchQuery}
-                      onChange={(e) => setCountrySearchQuery(e.target.value)}
-                      placeholder="Search country..."
-                      className="w-full pl-8.5 pr-8 py-2 bg-surface-2 border border-border-hairline rounded-2xl text-xs text-text-primary placeholder:text-text-secondary focus:outline-none focus:border-border-strong transition-all"
-                    />
-                    {countrySearchQuery && (
+                    {countriesSearchField()}
+                    <div className="flex flex-col gap-1" role="listbox" aria-label="Countries">
+                      {countriesMobileShown.length > 0
+                        ? countriesMobileShown.map((c) => countriesRow(c, () => {
+                            countriesPick(c.code);
+                            setCountriesMobileSection('profile');
+                          }))
+                        : countriesEmpty}
+                    </div>
+                    {!countriesQuery && countriesFiltered.length > 5 && (
                       <button
-                        onClick={() => setCountrySearchQuery('')}
-                        className="absolute inset-y-0 right-3 flex items-center text-text-secondary hover:text-text-primary"
+                        type="button"
+                        onClick={() => setCountriesMobileShowAll((v) => !v)}
+                        className="btn btn-secondary h-10 w-full"
                       >
-                        <PhosphorIcon name="close" className="text-xs" />
+                        {countriesMobileShowAll ? <CaretUp size={15} /> : <CaretDown size={15} />}
+                        <span>{countriesMobileShowAll ? 'Show fewer' : `Show all ${countriesFiltered.length}`}</span>
                       </button>
                     )}
                   </div>
+                )}
+              </div>
 
-                  {(() => {
-                    const countriesList = data.countries || [];
-                    const filtered = countriesList.filter((c) =>
-                      c.name.toLowerCase().includes(countrySearchQuery.toLowerCase())
-                    );
-                    const displayed = countrySearchQuery
-                      ? filtered
-                      : filtered.slice(0, countryVisibleCount);
+              {/* TABLET & DESKTOP VIEW (>= 768px) */}
+              <div className="hidden md:grid md:grid-cols-12 gap-6 animate-slide-up" id="countries-tab-view">
 
-                    return (
-                      <>
-                        <div className="flex flex-col gap-2">
-                          {displayed.length > 0 ? (
-                            displayed.map((c) => {
-                              const isSelected = c.code === selectedCountryCode;
-                              return (
-                                <div
-                                  key={c.code}
-                                  onClick={() => {
-                                    setSelectedCountryCode(c.code);
-                                    setSelectedCity(MONITORED_CITIES.find(cityObj => cityObj.code === c.code)?.city || 'New York');
-                                  }}
-                                  className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between ${isSelected
-                                    ? 'bg-surface-2 border-border-strong shadow-sm'
-                                    : 'bg-surface-1 border-border-hairline hover:border-border-strong'
-                                    }`}
-                                >
-                                  <div>
-                                    <p className="font-sans font-semibold text-xs text-text-primary">{c.name}</p>
-                                    <p className="text-[9px] text-text-secondary font-mono uppercase">Region: {c.region}</p>
-                                  </div>
-                                  <CountryFlag code={c.code} className="w-7 h-5 rounded shadow-sm flex-shrink-0" />
-                                </div>
-                              );
-                            })
-                          ) : (
-                            <div className="text-center py-6 text-xs text-text-secondary font-sans">
-                              No countries found matching "{countrySearchQuery}"
-                            </div>
-                          )}
-                        </div>
+                {/* Country list */}
+                <aside className="md:col-span-4 lg:col-span-3 card card-pad flex flex-col gap-3 self-start">
+                  <div className="flex items-baseline justify-between">
+                    <h3 className="card-title">Countries</h3>
+                    <span className="text-[13px] text-text-muted tabular-nums">
+                      {countriesQuery ? `${countriesFiltered.length} of ${countriesAll.length}` : `${countriesAll.length} total`}
+                    </span>
+                  </div>
 
-                        {/* See more countries button */}
-                        {!countrySearchQuery && filtered.length > 6 && (
-                          <button
-                            onClick={() => {
-                              if (countryVisibleCount >= filtered.length) {
-                                setCountryVisibleCount(6);
-                              } else {
-                                setCountryVisibleCount((prev) => Math.min(prev + 6, filtered.length));
-                              }
-                            }}
-                            className="mt-2 flex items-center justify-center gap-1.5 px-4 py-2 bg-transparent border border-border-hairline hover:border-border-strong rounded-2xl text-xs font-sans font-semibold text-text-secondary hover:text-text-primary hover:bg-surface-2/30 transition-all cursor-pointer w-full"
-                          >
-                            <PhosphorIcon
-                              name={countryVisibleCount >= filtered.length ? 'chevron-up' : 'chevron-down'}
-                              className="text-xs"
-                            />
-                            <span>
-                              {countryVisibleCount >= filtered.length
-                                ? 'Show less'
-                                : 'See more countries'}
-                            </span>
-                          </button>
-                        )}
-                      </>
-                    );
-                  })()}
-                </div>
+                  {countriesSearchField()}
 
-                {/* Center Detail Panel — Span 9 */}
-                <div className="lg:col-span-9 flex flex-col gap-6">
+                  <div className="flex flex-col gap-1" role="listbox" aria-label="Countries">
+                    {countriesDesktopShown.length > 0
+                      ? countriesDesktopShown.map((c) => countriesRow(c, () => countriesPick(c.code)))
+                      : countriesEmpty}
+                  </div>
 
-                  {/* Details banner */}
-                  <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-
-                    {/* Stats banner — Span 8 */}
-                    <div className="md:col-span-8 border border-border-hairline rounded-3xl bg-surface-1 p-6 shadow-sm flex flex-col justify-between min-h-[220px]">
-                      <div className="flex items-start justify-between">
-                        <div>
-                          <span className="font-mono text-[10px] text-status-accent uppercase tracking-widest font-medium">World Bank sovereign Indicators</span>
-                          <h2 className="font-sans font-light text-4xl tracking-tight text-text-primary mt-2 flex items-center gap-3">
-                            <CountryFlag code={activeCountry?.code || ''} className="w-10 h-7 rounded shadow-xs" />
-                            <span>
-                              {activeCountry?.name}
-                              <span className="font-medium text-xs font-mono uppercase text-text-secondary block mt-1">Capital: {activeCountry?.capital}</span>
-                            </span>
-                          </h2>
-                        </div>
-                        <div className="flex flex-wrap gap-1">
-                          {activeCountry?.tags.map((tag, idx) => (
-                            <span key={idx} className="px-2 py-0.5 rounded-full text-[9px] font-mono bg-status-indigo-bg text-status-indigo">
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 mt-8 pt-4 border-t border-border-hairline/40">
-                        <div>
-                          <p className="text-[10px] font-mono text-text-secondary uppercase leading-none">Gross Population</p>
-                          <p className="font-sans font-semibold text-base text-text-primary tabular-nums mt-1">
-                            {(activeCountry?.population / 1e6).toFixed(1)}M
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-mono text-text-secondary uppercase leading-none">Nominal GDP</p>
-                          <p className="font-sans font-semibold text-base text-text-primary tabular-nums mt-1">
-                            ${(activeCountry?.gdp / 1e12).toFixed(1)}T
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-mono text-text-secondary uppercase leading-none">Languages</p>
-                          <p className="font-sans font-semibold text-xs text-status-accent mt-1 uppercase">
-                            {activeCountry?.languages?.join(', ')}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Livability gauge Ring — Span 4 */}
-                    <div className="md:col-span-4">
-                      <StatGauge
-                        value={activeCountry?.livabilityIndex || 75}
-                        max={100}
-                        title="Sovereign Livability"
-                        subtitle="Weighted Index rating"
-                        label={`${activeCountry?.livabilityIndex} pts`}
-                        colorClass="text-status-indigo"
+                  {/* See more countries button */}
+                  {!countriesQuery && countriesFiltered.length > 6 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (countryVisibleCount >= countriesFiltered.length) {
+                          setCountryVisibleCount(6);
+                        } else {
+                          setCountryVisibleCount((prev) => Math.min(prev + 6, countriesFiltered.length));
+                        }
+                      }}
+                      className="btn btn-ghost btn-sm w-full"
+                    >
+                      <PhosphorIcon
+                        name={countryVisibleCount >= countriesFiltered.length ? 'chevron-up' : 'chevron-down'}
+                        size={15}
                       />
+                      <span>
+                        {countryVisibleCount >= countriesFiltered.length
+                          ? 'Show less'
+                          : `See more countries (${countriesFiltered.length - countryVisibleCount})`}
+                      </span>
+                    </button>
+                  )}
+                </aside>
+
+                {/* Detail column */}
+                <div className="md:col-span-8 lg:col-span-9 flex flex-col gap-6 min-w-0">
+
+                  {/* Profile + key indicators */}
+                  <section className="card overflow-hidden" id="countries-profile-card">
+                    <div className="p-5 lg:p-6 flex flex-wrap items-start justify-between gap-4">
+                      <div className="flex items-center gap-4 min-w-0">
+                        <CountryFlag code={activeCountry?.code || ''} className="w-14 h-10 rounded-md shadow-xs shrink-0 object-cover" />
+                        <div className="min-w-0">
+                          <h2 className="text-2xl font-semibold tracking-tight text-text-primary truncate">{activeCountry?.name}</h2>
+                          <p className="text-[14px] text-text-secondary mt-0.5">
+                            Capital: <span className="text-text-primary font-medium">{activeCountry?.capital}</span>
+                            <span className="text-text-muted"> · </span>
+                            {activeCountry?.region}
+                          </p>
+                        </div>
+                      </div>
+                      {countriesTags.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 justify-end">{countriesTags}</div>
+                      )}
                     </div>
 
-                  </div>
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-border-hairline border-t border-border-hairline">
+                      <div className="bg-surface-1 p-5">
+                        <p className="stat-label">Population</p>
+                        <p className="stat-value text-[22px] mt-1">{countriesFmtPopulation(activeCountry?.population)}</p>
+                      </div>
+                      <div className="bg-surface-1 p-5">
+                        <p className="stat-label">GDP (nominal)</p>
+                        <p className="stat-value text-[22px] mt-1">{countriesFmtGdp(activeCountry?.gdp)}</p>
+                      </div>
+                      <div className="bg-surface-1 p-5">
+                        <p className="stat-label">Languages</p>
+                        <p className="text-[15px] font-semibold text-text-primary mt-1.5 leading-snug">{activeCountry?.languages?.join(', ') || '—'}</p>
+                      </div>
+                      <div className="bg-surface-1 p-5">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="stat-label">Livability score</p>
+                          <StatusBadge tone={countriesLivabilityTone} progress="complete">{countriesLivabilityLabel}</StatusBadge>
+                        </div>
+                        <p className="stat-value text-[22px] mt-1">
+                          {countriesLivability}
+                          <span className="text-[14px] font-medium text-text-muted"> / 100</span>
+                        </p>
+                        <div className="mt-2 h-1.5 rounded-full bg-surface-3 overflow-hidden" aria-hidden="true">
+                          <div className={`h-full rounded-full ${countriesLivabilityBar}`} style={{ width: `${Math.min(100, Math.max(0, countriesLivability))}%` }} />
+                        </div>
+                      </div>
+                    </div>
+                  </section>
 
-                  {/* World Bank GDP trend lines */}
-                  <div className="border border-border-hairline rounded-3xl bg-surface-1 p-6 shadow-sm">
-                    <h3 className="font-sans font-medium text-sm text-text-primary mb-4 tracking-tight">GDP Growth Index Trend (World Bank Indicator API)</h3>
-                    <CountryGrowthChart data={activeCountry?.historicalGdp || []} type="gdp" countryName={activeCountry?.name || 'Sovereign'} />
-                  </div>
+                  {/* GDP growth chart */}
+                  <section className="card card-pad lg:p-6" id="countries-growth-card">
+                    <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+                      <div>
+                        <h3 className="card-title">GDP growth</h3>
+                        <p className="card-subtitle">World Bank indicator · {countriesGdpRange}</p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        {countriesGdpBadge}
+                        <div className="text-right">
+                          <p className="stat-value">{countriesFmtGdp(countriesGdpLast?.gdp)}</p>
+                          {countriesGdpLast && <p className="text-[12px] text-text-muted">Latest ({countriesGdpLast.year})</p>}
+                        </div>
+                      </div>
+                    </div>
+                    <CountryGrowthChart
+                      data={activeCountry?.historicalGdp || []}
+                      type="gdp"
+                      countryName={activeCountry?.name || 'Sovereign'}
+                      heightClass="h-[260px]"
+                    />
+                  </section>
 
                 </div>
 
@@ -4934,95 +4883,46 @@ export default function App() {
                           setMobileCountriesOpen(false);
                         }
                       }}
-                      className="fixed bottom-0 left-0 right-0 max-h-[80vh] bg-surface-2 border-t border-border-hairline rounded-t-[24px] z-50 flex flex-col shadow-2xl overflow-hidden pointer-events-auto"
+                      className="fixed bottom-0 left-0 right-0 max-h-[80vh] bg-surface-1 border-t border-border-hairline rounded-t-[24px] z-50 flex flex-col shadow-2xl overflow-hidden pointer-events-auto"
                       id="countries-mobile-bottom-sheet"
+                      role="dialog"
+                      aria-label="Select country"
                     >
                       {/* Swipe Handle Indicator */}
-                      <div className="w-10 h-1 bg-border-strong/25 rounded-full mx-auto my-3 shrink-0 cursor-grab active:cursor-grabbing" />
+                      <div className="w-10 h-1 bg-border-strong/40 rounded-full mx-auto my-3 shrink-0 cursor-grab active:cursor-grabbing" />
 
                       {/* Sheet Inner Content */}
-                      <div className="flex flex-col flex-1 px-5 pb-8 overflow-hidden">
+                      <div className="flex flex-col flex-1 min-h-0 px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
                         {/* Header */}
-                        <div className="flex items-center justify-between pb-3.5 border-b border-border-hairline shrink-0">
+                        <div className="flex items-center justify-between pb-3 shrink-0">
                           <div>
-                            <h3 className="font-sans font-semibold text-sm text-text-primary">Select Sovereign</h3>
-                            <p className="text-[10px] text-text-secondary mt-0.5">Choose from monitored countries</p>
+                            <h3 className="card-title">Select country</h3>
+                            <p className="card-subtitle">{countriesAll.length} monitored countries</p>
                           </div>
                           <button
+                            type="button"
                             onClick={() => setMobileCountriesOpen(false)}
-                            className="p-1.5 bg-surface-1 border border-border-hairline rounded-full text-text-secondary hover:text-text-primary transition-colors cursor-pointer shrink-0"
+                            className="btn btn-ghost btn-icon h-10 w-10 shrink-0"
+                            aria-label="Close"
                           >
-                            <X size={15} />
+                            <X size={18} />
                           </button>
                         </div>
 
                         {/* Search / Filter Input */}
-                        <div className="relative my-3.5 shrink-0">
-                          <input
-                            type="text"
-                            placeholder="Search country..."
-                            value={countrySearchQuery}
-                            onChange={(e) => setCountrySearchQuery(e.target.value)}
-                            className="w-full pl-8 pr-8 py-2 rounded-xl bg-surface-1 border border-border-hairline font-sans text-xs focus:outline-none focus:border-border-strong text-text-primary"
-                            autoFocus
-                          />
-                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted">
-                            <MagnifyingGlass size={13} />
-                          </span>
-                          {countrySearchQuery && (
-                            <button
-                              onClick={() => setCountrySearchQuery('')}
-                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary cursor-pointer p-0.5"
-                            >
-                              <X size={12} />
-                            </button>
-                          )}
+                        <div className="pb-3 shrink-0">
+                          {countriesSearchField(true)}
                         </div>
 
                         {/* List (Scrollable) */}
-                        <div className="flex-1 overflow-y-auto divide-y divide-border-hairline/30 pr-1">
-                          {(() => {
-                            const countriesList = data.countries || [];
-                            const filteredList = countriesList.filter(c =>
-                              c.name.toLowerCase().includes(countrySearchQuery.toLowerCase()) ||
-                              c.region.toLowerCase().includes(countrySearchQuery.toLowerCase())
-                            );
-
-                            if (filteredList.length === 0) {
-                              return (
-                                <div className="py-10 text-center text-xs text-text-secondary font-medium">
-                                  No countries match "{countrySearchQuery}"
-                                </div>
-                              );
-                            }
-
-                            return filteredList.map((c) => {
-                              const isSelected = c.code === selectedCountryCode;
-                              return (
-                                <div
-                                  key={c.code}
-                                  onClick={() => {
-                                    setSelectedCountryCode(c.code);
-                                    setSelectedCity(MONITORED_CITIES.find(cityObj => cityObj.code === c.code)?.city || 'New York');
-                                    setMobileCountriesOpen(false);
-                                  }}
-                                  className={`py-3 px-2 flex items-center justify-between transition-all cursor-pointer rounded-xl my-0.5 ${isSelected
-                                    ? 'bg-surface-1 border border-border-strong font-semibold shadow-xs'
-                                    : 'hover:bg-surface-1/40 border border-transparent'
-                                    }`}
-                                >
-                                  <div className="flex items-center gap-2.5">
-                                    <CountryFlag code={c.code} className="w-6 h-4 rounded shadow-2xs shrink-0" />
-                                    <div>
-                                      <p className="font-sans font-medium text-xs text-text-primary">{c.name}</p>
-                                      <p className="text-[10px] text-text-secondary font-sans font-medium">{c.region}</p>
-                                    </div>
-                                  </div>
-                                  <span className="text-[10px] text-text-secondary font-medium bg-surface-1 px-2 py-0.5 rounded border border-border-hairline/45">Ranked</span>
-                                </div>
-                              );
-                            });
-                          })()}
+                        <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-1 -mx-1 px-1" role="listbox" aria-label="Countries">
+                          {countriesFiltered.length > 0
+                            ? countriesFiltered.map((c) => countriesRow(c, () => {
+                                countriesPick(c.code);
+                                setMobileCountriesOpen(false);
+                                setCountriesMobileSection('profile');
+                              }))
+                            : countriesEmpty}
                         </div>
                       </div>
                     </motion.div>
@@ -5030,168 +4930,137 @@ export default function App() {
                 )}
               </AnimatePresence>
             </>
-          )}
+            );
+          })()}
 
           {/* ==================== TAB 7: REPORTS PAGE ==================== */}
-          {activeTab === 'reports' && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-slide-up" id="reports-tab-view">
+          {activeTab === 'reports' && (() => {
+            const reportsList = [
+              { id: 'crypto', icon: 'coin-stack', label: 'Cryptocurrency Ticker Log', desc: 'Prices, 24h change, market cap and volume for top tokens.', sizeKb: 4.2, format: 'CSV' },
+              { id: 'weather', icon: 'cloud-sun', label: 'Regional Weather Forecasts', desc: 'Forecast metrics for New York, London, Tokyo and Sydney.', sizeKb: 5.8, format: 'CSV' },
+              { id: 'aqi', icon: 'globe', label: 'Air Quality Index Logs', desc: 'AQI with PM2.5, PM10, CO and ozone readings per city.', sizeKb: 3.1, format: 'CSV' },
+              { id: 'currency', icon: 'dollar', label: 'Historical Exchange Rates Log', desc: 'Daily FX rates for tracked pairs (EUR/USD, GBP/USD, AUD/USD…).', sizeKb: 3.5, format: 'CSV' }
+            ];
+            const reportsAllIds = reportsList.map((r) => r.id);
+            const reportsQuery = reportsSearchQuery.trim().toLowerCase();
+            const reportsFiltered = reportsList.filter((r) => {
+              const matchesSearch = r.label.toLowerCase().includes(reportsQuery) ||
+                r.desc.toLowerCase().includes(reportsQuery);
+              const isSelected = selectedLogs.includes(r.id);
+              const matchesFilter = reportsFilter === 'all' ||
+                (reportsFilter === 'selected' && isSelected) ||
+                (reportsFilter === 'unselected' && !isSelected);
+              return matchesSearch && matchesFilter;
+            });
+            const reportsCount = selectedLogs.length;
+            const reportsAllSelected = reportsCount === reportsAllIds.length;
+            const reportsSomeSelected = reportsCount > 0 && !reportsAllSelected;
+            const reportsToggleAll = () => setSelectedLogs(reportsAllSelected ? [] : reportsAllIds);
+            const reportsToggle = (id: string) => setSelectedLogs((prev) =>
+              prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+            );
+            const reportsSizeKb = reportsList
+              .filter((r) => selectedLogs.includes(r.id))
+              .reduce((sum, r) => sum + r.sizeKb, 0);
+            const reportsCtaLabel = reportsCount === 0
+              ? 'Select logs to download'
+              : `Download ${reportsCount} ${reportsCount === 1 ? 'log' : 'logs'} as CSV`;
 
-              {/* Left explanation — Span 4 — Styled with 2px top category-accent border */}
-              <div className="lg:col-span-4 border border-border-hairline border-t-2 border-t-status-warning rounded-3xl bg-surface-2 text-text-primary p-6 shadow-xs flex flex-col justify-between min-h-[300px]">
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="font-sans text-[10px] text-status-warning uppercase tracking-widest font-semibold">Export Workspace</span>
-                    <div className="group relative">
-                      <PhosphorIcon name="info" className="text-text-muted hover:text-status-warning transition-colors cursor-pointer text-sm" />
-                      <div className="absolute right-0 bottom-full mb-2 hidden group-hover:flex flex-col items-center z-30" id="version-tooltip-content">
-                        <div className="bg-surface-1 text-text-primary text-[10px] font-mono whitespace-nowrap rounded px-2.5 py-1 border border-border-hairline shadow-lg">
-                          Climex journal compiled
-                        </div>
-                        <div className="w-2 h-2 bg-surface-1 border-r border-b border-border-hairline/50 transform rotate-45 -mt-1" />
-                      </div>
-                    </div>
-                  </div>
-                  <h2 className="font-sans font-light text-3xl tracking-tight text-text-primary mt-4">
-                    Compile <span className="font-medium text-status-warning">aggregated ledger</span>
-                  </h2>
-                  <p className="text-xs text-text-secondary mt-4 leading-relaxed font-body">
-                    Download a spreadsheet with all your selected data logs combined in one file. It's saved as a CSV, so you can open it in Excel, Google Sheets, or import it anywhere.
-                  </p>
+            const reportsCheckbox = (state: 'on' | 'off' | 'mixed') => (
+              <span
+                aria-hidden="true"
+                className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 transition-colors ${state === 'off'
+                    ? 'border-border-strong bg-surface-1 text-transparent'
+                    : 'bg-accent border-accent text-on-accent'
+                  }`}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                  {state === 'mixed' ? <line x1="5" y1="12" x2="19" y2="12" /> : <polyline points="20 6 9 17 4 12" />}
+                </svg>
+              </span>
+            );
 
-                  {/* Estimated Size Card */}
-                  <div className="mt-4 p-3 bg-surface-1 rounded-2xl border border-border-hairline/40 text-xs flex justify-between items-center">
-                    <span className="text-text-secondary font-medium">Estimated combined size</span>
-                    <span className="font-mono text-status-warning font-semibold">
-                      {selectedLogs.reduce((sum, logId) => {
-                        if (logId === 'crypto') return sum + 4.2;
-                        if (logId === 'weather') return sum + 5.8;
-                        if (logId === 'aqi') return sum + 3.1;
-                        if (logId === 'currency') return sum + 3.5;
-                        return sum;
-                      }, 0).toFixed(1)} KB
-                    </span>
-                  </div>
+            const reportsCtaInner = (compact: boolean) => exportingBundle ? (
+              <>
+                <span className="w-4 h-4 rounded-full border-2 border-current/30 border-t-current animate-spin shrink-0" />
+                <span>Preparing your file…</span>
+              </>
+            ) : (
+              <>
+                <PhosphorIcon name={bundleError ? 'error-circle' : 'download'} size={18} className="shrink-0" />
+                <span className="truncate">
+                  {bundleError ? (compact ? 'Try again' : "Couldn't create the file. Try again") : reportsCtaLabel}
+                </span>
+              </>
+            );
+            const reportsCtaClass = bundleError ? 'bg-status-danger text-white hover:opacity-95' : 'btn-accent';
 
-                  {/* Primary CTA Button */}
-                  <button
-                    onClick={() => handleExportCSV('ledger')}
-                    disabled={selectedLogs.length === 0 || exportingBundle}
-                    className={`mt-6 flex items-center justify-center gap-2 px-5 py-2.5 transition-all rounded-full text-xs font-sans font-bold cursor-pointer w-full shadow-md ${selectedLogs.length === 0
-                      ? 'bg-status-warning/20 text-text-muted cursor-not-allowed border border-border-hairline/30 shadow-none'
-                      : bundleError
-                        ? 'bg-status-danger text-white hover:opacity-95 shadow-status-danger/15'
-                        : 'bg-status-warning hover:opacity-90 active:scale-95 text-black shadow-status-warning/15'
-                      }`}
-                    id="generate-ledger-cta-btn"
-                  >
-                    {exportingBundle ? (
-                      <>
-                        <div className="w-3.5 h-3.5 rounded-full border-2 border-black/30 border-t-black animate-spin shrink-0" />
-                        <span>Preparing ledger...</span>
-                      </>
-                    ) : (
-                      <>
-                        <PhosphorIcon name="download" className="text-sm font-bold shrink-0" />
-                        <span className="truncate">
-                          {bundleError
-                            ? "couldn't generate the file. Retry"
-                            : selectedLogs.length === 0
-                              ? "No logs selected (CSV)"
-                              : `Download ${selectedLogs.length} ${selectedLogs.length === 1 ? 'log' : 'logs'} (CSV)`
-                          }
-                        </span>
-                        <span className="px-1.5 py-0.2 text-[8px] bg-black/10 text-black font-mono rounded uppercase">CSV</span>
-                      </>
-                    )}
-                  </button>
+            return (
+            <>
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6 items-start pb-28 lg:pb-0 animate-slide-up" id="reports-tab-view">
 
-                  {selectedLogs.length === 0 && (
-                    <p className="text-[10px] text-status-danger font-medium mt-2 text-center animate-pulse">
-                      ⚠️ select at least one log to export
+              {/* Step 1: pick logs */}
+              <section className="lg:col-span-8 card card-pad md:p-5 flex flex-col gap-3 md:gap-4" id="reports-logs-card">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="card-title">Data logs</h3>
+                    <p className="card-subtitle">
+                      <span className="tabular-nums">{reportsCount} of {reportsAllIds.length} selected</span>
+                      <span className="hidden sm:inline"> · tick the logs to include, then download</span>
                     </p>
-                  )}
-                </div>
-                <div className="pt-4 border-t border-border-hairline text-[11px] font-sans text-status-warning font-semibold tracking-wide flex items-center gap-1.5 mt-6">
-                  <span className="w-1.5 h-1.5 rounded-full bg-status-warning" />
-                  <span>Climex ledger compiled: {getLogLastUpdated('ledger')}</span>
-                </div>
-              </div>
-
-              {/* Right list of files/reports — Span 8 */}
-              <div className="lg:col-span-8 border border-border-hairline border-t-2 border-t-status-warning rounded-3xl bg-surface-1 p-6 shadow-xs flex flex-col gap-4">
-                <div className="flex items-center justify-between border-b border-border-hairline pb-3">
-                  <div className="flex items-center gap-2">
-                    {/* Master Checkbox to Toggle All */}
-                    <button
-                      onClick={() => {
-                        const allLogIds = ['crypto', 'weather', 'aqi', 'currency'];
-                        if (selectedLogs.length === allLogIds.length) {
-                          setSelectedLogs([]);
-                        } else {
-                          setSelectedLogs(allLogIds);
-                        }
-                      }}
-                      className={`w-4 h-4 rounded-md border flex items-center justify-center transition-all cursor-pointer ${selectedLogs.length === 4
-                        ? 'bg-status-warning border-status-warning text-black'
-                        : selectedLogs.length > 0
-                          ? 'bg-status-warning/45 border-status-warning text-black'
-                          : 'border-border-strong bg-surface-2 text-transparent'
-                        }`}
-                      title={selectedLogs.length === 4 ? "Deselect all logs" : "Select all logs"}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                        {selectedLogs.length === 4 ? (
-                          <polyline points="20 6 9 17 4 12" />
-                        ) : selectedLogs.length > 0 ? (
-                          <line x1="5" y1="12" x2="19" y2="12" />
-                        ) : null}
-                      </svg>
-                    </button>
-                    <h3 className="font-sans font-semibold text-sm text-text-primary">Available Data Logs</h3>
                   </div>
-                  <span className="text-[10px] font-mono bg-surface-2 px-2.5 py-1 rounded-full text-text-secondary border border-border-hairline/40">
-                    {selectedLogs.length} of 4 Selected
-                  </span>
+                  {/* Master Checkbox to Toggle All */}
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={reportsAllSelected ? true : reportsSomeSelected ? 'mixed' : false}
+                    onClick={reportsToggleAll}
+                    className="btn btn-ghost h-10 px-3 shrink-0 text-text-primary"
+                    title={reportsAllSelected ? 'Deselect all logs' : 'Select all logs'}
+                  >
+                    {reportsCheckbox(reportsAllSelected ? 'on' : reportsSomeSelected ? 'mixed' : 'off')}
+                    <span>{reportsAllSelected ? 'Clear all' : 'Select all'}</span>
+                  </button>
                 </div>
 
                 {/* Search and Filters Controls */}
-                <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
-                  {/* Search Input */}
+                <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
                   <div className="relative flex-1">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none">
+                      <PhosphorIcon name="search" size={16} />
+                    </span>
                     <input
-                      type="text"
-                      placeholder="Search log sources..."
+                      type="search"
+                      placeholder="Search logs"
+                      aria-label="Search logs"
                       value={reportsSearchQuery}
                       onChange={(e) => setReportsSearchQuery(e.target.value)}
-                      className="w-full bg-surface-2 border border-border-hairline rounded-full pl-9 pr-8 py-1.5 font-sans text-xs focus:outline-none focus:border-border-strong text-text-primary placeholder:text-text-muted"
+                      className="w-full h-10 bg-surface-1 border border-border-hairline rounded-lg pl-9 pr-10 font-sans text-[14px] focus:outline-none focus:border-border-strong text-text-primary placeholder:text-text-muted [&::-webkit-search-cancel-button]:hidden"
                     />
-                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-text-muted">
-                      <PhosphorIcon name="search" className="text-xs" />
-                    </span>
                     {reportsSearchQuery && (
                       <button
+                        type="button"
                         onClick={() => setReportsSearchQuery('')}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary cursor-pointer p-0.5"
+                        aria-label="Clear search"
+                        className="absolute right-0 top-0 h-10 w-10 flex items-center justify-center text-text-muted hover:text-text-primary cursor-pointer"
                       >
-                        <PhosphorIcon name="x" className="text-[10px]" />
+                        <PhosphorIcon name="x" size={15} />
                       </button>
                     )}
                   </div>
 
                   {/* Filter Pills */}
-                  <div className="flex items-center gap-1 bg-surface-2 p-1 rounded-full border border-border-hairline/40 shrink-0">
+                  <div className="segmented segmented-full sm:w-auto shrink-0 [&>button]:h-9 [&>button]:whitespace-nowrap sm:[&>button]:flex-none sm:[&>button]:px-3.5" role="group" aria-label="Filter logs">
                     {[
-                      { value: 'all', label: 'All Logs' },
+                      { value: 'all', label: 'All' },
                       { value: 'selected', label: 'Selected' },
                       { value: 'unselected', label: 'Unselected' }
                     ].map((btn) => (
                       <button
                         key={btn.value}
+                        type="button"
                         onClick={() => setReportsFilter(btn.value as any)}
-                        className={`px-3 py-1 rounded-full font-sans text-[10px] font-semibold transition-all cursor-pointer ${reportsFilter === btn.value
-                          ? 'bg-status-warning text-black font-bold shadow-2xs'
-                          : 'text-text-secondary hover:text-text-primary'
-                          }`}
+                        aria-pressed={reportsFilter === btn.value}
                       >
                         {btn.label}
                       </button>
@@ -5200,355 +5069,459 @@ export default function App() {
                 </div>
 
                 {/* Main List */}
-                <div className="space-y-3 mt-1">
-                  {(() => {
-                    const reportsList = [
-                      { id: 'crypto', label: 'Cryptocurrency Ticker Log', desc: 'Top tokens market price index.', size: '4.2 KB', format: 'CSV' },
-                      { id: 'weather', label: 'Regional Weather Forecasts', desc: 'Forecast metrics for New York, London, Tokyo, and Sydney.', size: '5.8 KB', format: 'CSV' },
-                      { id: 'aqi', label: 'Air Quality Index Logs', desc: 'Particulate matters (PM2.5, PM10) monitoring stats.', size: '3.1 KB', format: 'CSV' },
-                      { id: 'currency', label: 'Historical Exchange Rates Log', desc: 'Daily historical FX rates for tracked currency pairs (e.g., EUR/USD, GBP/USD, AUD/USD).', size: '3.5 KB', format: 'CSV' }
-                    ];
-
-                    const filtered = reportsList.filter((r) => {
-                      const matchesSearch = r.label.toLowerCase().includes(reportsSearchQuery.toLowerCase()) ||
-                        r.desc.toLowerCase().includes(reportsSearchQuery.toLowerCase());
-                      const isSelected = selectedLogs.includes(r.id);
-                      const matchesFilter = reportsFilter === 'all' ||
-                        (reportsFilter === 'selected' && isSelected) ||
-                        (reportsFilter === 'unselected' && !isSelected);
-                      return matchesSearch && matchesFilter;
-                    });
-
-                    if (filtered.length === 0) {
-                      return (
-                        <div className="py-12 px-6 border border-dashed border-border-strong/40 rounded-2xl bg-surface-2/20 text-center flex flex-col items-center justify-center" id="reports-empty-state">
-                          <div className="w-12 h-12 rounded-full bg-surface-2 border border-border-hairline flex items-center justify-center text-text-muted mb-4 shadow-2xs">
-                            <PhosphorIcon name="file" className="text-xl" />
-                          </div>
-                          <h4 className="font-sans font-semibold text-xs text-text-primary mb-1">No Available Logs Found</h4>
-                          <p className="text-[11px] text-text-secondary max-w-xs leading-relaxed mb-4">
-                            {reportsSearchQuery || reportsFilter !== 'all'
-                              ? "No log entries match your active search term or filter constraints."
-                              : "No logs have been synchronized. Trigger a manual sync or clear filters."}
-                          </p>
-                          <div className="flex gap-2">
-                            {(reportsSearchQuery || reportsFilter !== 'all') && (
-                              <button
-                                onClick={() => {
-                                  setReportsSearchQuery('');
-                                  setReportsFilter('all');
-                                }}
-                                className="px-3.5 py-1.5 bg-surface-2 border border-border-hairline hover:bg-surface-1 text-text-primary rounded-full font-sans font-semibold text-[10px] cursor-pointer transition-all"
-                              >
-                                Clear Search
-                              </button>
-                            )}
-                            <button
-                              onClick={() => {
-                                setSelectedLogs(['crypto', 'weather', 'aqi', 'currency']);
-                                setReportsSearchQuery('');
-                                setReportsFilter('all');
-                                fetchDashboardData(true);
-                              }}
-                              className="px-3.5 py-1.5 bg-text-primary text-surface-1 hover:opacity-90 rounded-full font-sans font-bold text-[10px] cursor-pointer transition-all shadow-xs"
-                            >
-                              Sync Workspace
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    }
-
-                    return filtered.map((report) => {
+                {reportsFiltered.length === 0 ? (
+                  <div className="py-10 px-6 border border-dashed border-border-strong/50 rounded-xl text-center flex flex-col items-center" id="reports-empty-state">
+                    <div className="w-11 h-11 rounded-full bg-surface-2 flex items-center justify-center text-text-muted mb-3">
+                      <PhosphorIcon name="file" size={20} />
+                    </div>
+                    <h4 className="text-[15px] font-semibold text-text-primary">No logs to show</h4>
+                    <p className="text-[13px] text-text-secondary max-w-xs leading-relaxed mt-1 mb-4">
+                      {reportsSearchQuery || reportsFilter !== 'all'
+                        ? 'No logs match your search or filter.'
+                        : 'No logs have been synced yet. Sync the workspace to fetch fresh data.'}
+                    </p>
+                    <div className="flex flex-wrap justify-center gap-2">
+                      {(reportsSearchQuery || reportsFilter !== 'all') && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setReportsSearchQuery('');
+                            setReportsFilter('all');
+                          }}
+                          className="btn btn-secondary h-10"
+                        >
+                          Clear filters
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedLogs(['crypto', 'weather', 'aqi', 'currency']);
+                          setReportsSearchQuery('');
+                          setReportsFilter('all');
+                          fetchDashboardData(true);
+                        }}
+                        className="btn btn-primary h-10"
+                      >
+                        Sync workspace
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <ul className="flex flex-col gap-2" id="reports-log-list">
+                    {reportsFiltered.map((report) => {
                       const isSelected = selectedLogs.includes(report.id);
                       const isLogDownloading = exportingLogId === report.id;
                       const logError = logErrors[report.id];
 
                       return (
-                        <div
+                        <li
                           key={report.id}
-                          className={`p-4 rounded-2xl bg-surface-2 border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${isSelected
-                            ? 'border-border-strong bg-surface-2/65 shadow-2xs'
-                            : 'border-border-hairline/60 opacity-80'
-                            } hover:border-status-warning/40`}
+                          className={`flex items-center gap-1 sm:gap-3 rounded-xl border p-1.5 sm:p-2 pr-2 sm:pr-3 transition-colors ${isSelected
+                              ? 'border-border-strong bg-surface-2'
+                              : 'border-border-hairline bg-surface-1 hover:bg-surface-2/60'
+                            }`}
                         >
-                          <div className="flex items-start gap-3">
-                            {/* Checkbox */}
-                            <button
-                              onClick={() => {
-                                setSelectedLogs(prev =>
-                                  prev.includes(report.id)
-                                    ? prev.filter(id => id !== report.id)
-                                    : [...prev, report.id]
-                                );
-                              }}
-                              className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all cursor-pointer mt-0.5 shrink-0 ${isSelected
-                                ? 'bg-status-warning border-status-warning text-black'
-                                : 'border-border-strong bg-surface-1 text-transparent hover:border-text-primary'
-                                }`}
-                            >
-                              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                                <polyline points="20 6 9 17 4 12" />
-                              </svg>
-                            </button>
-
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <p className="font-sans font-semibold text-xs text-text-primary">{report.label}</p>
-                                <span className="text-[8px] font-mono bg-surface-1 border border-border-strong/15 px-1.5 py-0.2 rounded font-semibold text-text-secondary">
-                                  {report.format}
-                                </span>
-                              </div>
-                              <p className="text-[10px] text-text-secondary mt-1 max-w-md">{report.desc}</p>
-
-                              {/* Synchronized indicator in beautiful fresh success-green (solid non-pulsing dot) */}
-                              <p className="text-[9px] font-sans text-text-secondary mt-2 flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-status-success/70" />
-                                <span>Synced: {getLogLastUpdated(report.id)}</span>
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center justify-between sm:justify-end gap-4 border-t sm:border-t-0 border-border-hairline/30 pt-3 sm:pt-0 shrink-0">
-                            <span className="font-mono text-[10px] text-text-secondary tabular-nums">{report.size}</span>
-                            <button
-                              onClick={() => handleExportCSV(report.id)}
-                              disabled={isLogDownloading}
-                              className={`flex items-center gap-1.5 px-4 py-1.5 rounded-full font-sans font-bold text-[11px] shadow-xs hover:shadow-sm transition-all duration-150 cursor-pointer ${logError
-                                ? 'bg-status-danger text-white hover:opacity-95'
-                                : isLogDownloading
-                                  ? 'bg-surface-1 text-text-muted cursor-not-allowed border border-border-hairline'
-                                  : 'bg-text-primary text-surface-1 hover:opacity-90'
-                                }`}
-                            >
-                              {isLogDownloading ? (
-                                <>
-                                  <div className="w-3 h-3 rounded-full border-2 border-text-muted/30 border-t-text-primary animate-spin shrink-0" />
-                                  <span>preparing...</span>
-                                </>
-                              ) : logError ? (
-                                <>
-                                  <PhosphorIcon name="warning" className="text-xs shrink-0" />
-                                  <span>Retry</span>
-                                </>
-                              ) : (
-                                <>
-                                  <PhosphorIcon name="download" className="text-xs shrink-0" />
-                                  <span>Download</span>
-                                </>
+                          {/* Checkbox + details (whole area toggles selection) */}
+                          <button
+                            type="button"
+                            role="checkbox"
+                            aria-checked={isSelected}
+                            onClick={() => reportsToggle(report.id)}
+                            className="flex flex-1 min-w-0 items-start gap-3 text-left rounded-lg p-2 min-h-10 cursor-pointer"
+                          >
+                            <span className="mt-0.5">{reportsCheckbox(isSelected ? 'on' : 'off')}</span>
+                            <span className="hidden sm:flex w-9 h-9 rounded-lg bg-surface-1 border border-border-hairline items-center justify-center text-text-secondary shrink-0">
+                              <PhosphorIcon name={report.icon} size={18} />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block text-[14px] font-semibold text-text-primary leading-snug">{report.label}</span>
+                              <span className="block text-[13px] text-text-secondary mt-0.5 line-clamp-1 sm:line-clamp-none">{report.desc}</span>
+                              <span className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                                <span className="text-[12.5px] text-text-muted tabular-nums">{report.format} · {report.sizeKb.toFixed(1)} KB</span>
+                                <StatusBadge tone="success" progress="complete" size="sm">Synced · {getLogLastUpdated(report.id)}</StatusBadge>
+                              </span>
+                              {logError && (
+                                <span className="block text-[13px] text-status-danger mt-1" role="alert">Couldn't create this file. Try again.</span>
                               )}
-                            </button>
-                          </div>
-                        </div>
+                            </span>
+                          </button>
+
+                          {/* Individual download */}
+                          <button
+                            type="button"
+                            onClick={() => handleExportCSV(report.id)}
+                            disabled={isLogDownloading}
+                            aria-label={`Download ${report.label} as CSV`}
+                            className={`btn h-10 w-10 px-0 sm:w-auto sm:h-9 sm:px-3 shrink-0 ${logError ? 'bg-status-danger text-white hover:opacity-95' : 'btn-secondary'}`}
+                          >
+                            {isLogDownloading ? (
+                              <>
+                                <span className="w-4 h-4 rounded-full border-2 border-current/30 border-t-current animate-spin shrink-0" />
+                                <span className="hidden sm:inline">Preparing…</span>
+                              </>
+                            ) : logError ? (
+                              <>
+                                <PhosphorIcon name="error-circle" size={16} className="shrink-0" />
+                                <span className="hidden sm:inline">Try again</span>
+                              </>
+                            ) : (
+                              <>
+                                <PhosphorIcon name="download" size={16} className="shrink-0" />
+                                <span className="hidden sm:inline">Download</span>
+                              </>
+                            )}
+                          </button>
+                        </li>
                       );
-                    });
-                  })()}
+                    })}
+                  </ul>
+                )}
+              </section>
+
+              {/* Step 2: combined download (desktop) */}
+              <aside className="hidden lg:flex lg:col-span-4 lg:sticky lg:top-6 card card-pad lg:p-5 flex-col gap-4" id="reports-summary-card">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="card-title">Combined download</h3>
+                    <p className="card-subtitle">One CSV with every selected log. Opens in Excel or Google Sheets.</p>
+                  </div>
+                  <div className="group relative shrink-0">
+                    <PhosphorIcon name="info" size={16} className="text-text-muted hover:text-text-primary transition-colors cursor-pointer" />
+                    <div className="absolute right-0 bottom-full mb-2 hidden group-hover:flex flex-col items-center z-30" id="version-tooltip-content">
+                      <div className="bg-surface-1 text-text-primary text-[12px] whitespace-nowrap rounded-md px-2.5 py-1 border border-border-hairline shadow-lg">
+                        Climex journal compiled
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
+
+                <dl className="rounded-xl bg-surface-2 divide-y divide-border-hairline text-[14px]">
+                  <div className="flex items-center justify-between px-3.5 py-2.5">
+                    <dt className="text-text-secondary">Logs selected</dt>
+                    <dd className="font-semibold text-text-primary tabular-nums">{reportsCount} of {reportsAllIds.length}</dd>
+                  </div>
+                  <div className="flex items-center justify-between px-3.5 py-2.5">
+                    <dt className="text-text-secondary">Estimated size</dt>
+                    <dd className="font-semibold text-text-primary tabular-nums">{reportsSizeKb.toFixed(1)} KB</dd>
+                  </div>
+                  <div className="flex items-center justify-between px-3.5 py-2.5">
+                    <dt className="text-text-secondary">Format</dt>
+                    <dd className="font-semibold text-text-primary">CSV</dd>
+                  </div>
+                </dl>
+
+                {/* Primary CTA Button */}
+                <button
+                  type="button"
+                  onClick={() => handleExportCSV('ledger')}
+                  disabled={reportsCount === 0 || exportingBundle}
+                  className={`btn btn-lg w-full ${reportsCtaClass}`}
+                  id="generate-ledger-cta-btn"
+                >
+                  {reportsCtaInner(false)}
+                </button>
+
+                {reportsCount === 0 && (
+                  <p className="text-[13px] text-text-secondary -mt-1 text-center">Pick at least one log to continue.</p>
+                )}
+                {bundleError && !exportingBundle && (
+                  <p className="text-[13px] text-status-danger -mt-1 text-center" role="alert">The file couldn't be created. Your selection is kept — try again.</p>
+                )}
+
+                <div className="pt-3 border-t border-border-hairline">
+                  {ledgerCompiledTime ? (
+                    <StatusBadge tone="success" progress="complete">Last combined download · {getLogLastUpdated('ledger')}</StatusBadge>
+                  ) : (
+                    <StatusBadge tone="neutral" progress="incomplete">No combined download yet</StatusBadge>
+                  )}
+                </div>
+              </aside>
 
             </div>
-          )}
+
+            {/* Sticky action bar (mobile & tablet): keeps the primary download reachable */}
+            <div
+              className="lg:hidden fixed inset-x-0 bottom-0 z-40 border-t border-border-hairline bg-surface-1/95 backdrop-blur px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-4px_16px_rgb(0_0_0/0.06)]"
+              id="reports-mobile-action-bar"
+            >
+              <div className="max-w-3xl mx-auto flex items-center gap-3">
+                <div className="min-w-0 shrink-0">
+                  <p className="text-[14px] font-semibold text-text-primary tabular-nums leading-tight">{reportsCount} of {reportsAllIds.length} selected</p>
+                  <p className={`text-[12.5px] leading-tight mt-0.5 ${bundleError && !exportingBundle ? 'text-status-danger' : 'text-text-muted'}`}>
+                    {bundleError && !exportingBundle ? 'Download failed' : reportsCount === 0 ? 'Pick a log above' : `${reportsSizeKb.toFixed(1)} KB · CSV`}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleExportCSV('ledger')}
+                  disabled={reportsCount === 0 || exportingBundle}
+                  className={`btn btn-lg flex-1 min-w-0 ${reportsCtaClass}`}
+                  id="generate-ledger-cta-btn-mobile"
+                >
+                  {reportsCtaInner(true)}
+                </button>
+              </div>
+            </div>
+            </>
+            );
+          })()}
 
           {/* ==================== TAB 8: SETTINGS PAGE ==================== */}
-          {activeTab === 'settings' && (
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-slide-up" id="settings-tab-view">
+          {activeTab === 'settings' && (() => {
+            const settingsFlashSaved = (key: string) => {
+              setSettingsSavedKey(key);
+              window.setTimeout(() => setSettingsSavedKey(cur => (cur === key ? null : cur)), 2500);
+            };
+            const settingsNameDirty = userNameInput.trim() !== (userName || '');
+            const settingsSaveName = () => {
+              const trimmed = userNameInput.trim();
+              if (trimmed) {
+                localStorage.setItem('climex_user_name', trimmed);
+                setUserName(trimmed);
+              } else {
+                localStorage.removeItem('climex_user_name');
+                setUserName(null);
+              }
+              settingsFlashSaved('name');
+            };
+            const settingsTabs: Array<{ id: 'profile' | 'display' | 'data'; label: string }> = [
+              { id: 'profile', label: 'Profile' },
+              { id: 'display', label: 'Display' },
+              { id: 'data', label: 'Data & alerts' },
+            ];
 
-              {/* Left Column: Personalization — Span 5 */}
-              <div className="lg:col-span-5 border border-border-hairline rounded-3xl bg-surface-1 p-6 shadow-sm flex flex-col justify-between">
-                <div>
-                  <span className="font-mono text-[10px] text-text-muted uppercase tracking-wider">Identity</span>
-                  <h3 className="font-sans font-semibold text-base text-text-primary mt-2 mb-1">Personalization</h3>
-                  <p className="text-xs text-text-secondary mb-6">Manage how you are addressed across the workspace</p>
+            return (
+              <div className="animate-slide-up max-w-5xl" id="settings-tab-view">
+                {/* Mobile: one section per screen via a segmented switcher */}
+                <div className="md:hidden mb-4">
+                  <div className="segmented segmented-full" role="group" aria-label="Settings sections">
+                    {settingsTabs.map(t => (
+                      <button
+                        key={t.id}
+                       
+                        aria-selected={settingsSection === t.id}
+                        aria-pressed={settingsSection === t.id}
+                        aria-controls={`settings-section-${t.id}`}
+                        onClick={() => setSettingsSection(t.id)}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-                  <div className="bg-surface-2 p-5 rounded-2xl border border-border-hairline/40 flex flex-col gap-4">
-                    <div>
-                      <label className="block font-sans font-semibold text-xs text-text-primary mb-1.5">Display name</label>
+                <div className="flex items-center gap-2 mb-4 md:mb-8 text-[13px] text-text-secondary">
+                  <PhosphorIcon name="info" size={16} className="text-text-muted shrink-0" />
+                  <span>Preferences save automatically and stay on this device.</span>
+                </div>
+
+                <div className="flex flex-col">
+                  {/* Profile */}
+                  <SettingsSection
+                    id="settings-section-profile"
+                    title="Profile"
+                    description="How Climex addresses you. Your name appears in the dashboard greeting and is only stored in this browser."
+                    activeOnMobile={settingsSection === 'profile'}
+                  >
+                    <form
+                      className="card-pad flex flex-col gap-3"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        settingsSaveName();
+                      }}
+                    >
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <label htmlFor="settings-display-name" className="text-[14px] font-medium text-text-primary">Display name</label>
+                          {settingsSavedKey === 'name' && (
+                            <StatusBadge tone="success" progress="complete" size="xs">Saved</StatusBadge>
+                          )}
+                        </div>
+                        <p className="mt-0.5 text-[13px] text-text-secondary">Leave empty to use the default greeting.</p>
+                      </div>
                       <input
+                        id="settings-display-name"
                         type="text"
+                        autoComplete="name"
                         placeholder="Enter your name"
-                        className="w-full bg-surface-1 border border-border-hairline focus:border-text-primary rounded-full px-4 py-2 font-sans text-xs focus:outline-none transition-all text-text-primary"
+                        className="w-full sm:max-w-sm h-11 sm:h-10 bg-surface-1 border border-border-hairline hover:border-border-strong focus:border-border-strong focus:ring-4 focus:ring-accent/10 rounded-lg px-3 font-sans text-[15px] sm:text-[14px] focus:outline-none transition-all text-text-primary placeholder:text-text-muted"
                         value={userNameInput}
                         onChange={(e) => setUserNameInput(e.target.value)}
                       />
-                      <p className="text-[10px] text-text-muted mt-2">
-                        This name is used in your dashboard greetings (e.g. "Good morning, {userName || 'user'}").
+                      <p className="text-[13px] text-text-muted">
+                        Preview: <span className="text-text-secondary">“{getGreeting()}, {userNameInput.trim() || userName || 'trader'}”</span>
                       </p>
-                    </div>
-
-                    <div className="flex items-center gap-2 pt-2 border-t border-border-hairline/50">
-                      <button
-                        onClick={() => {
-                          const trimmed = userNameInput.trim();
-                          if (trimmed) {
-                            localStorage.setItem('climex_user_name', trimmed);
-                            setUserName(trimmed);
-                          } else {
-                            localStorage.removeItem('climex_user_name');
-                            setUserName(null);
-                          }
-                        }}
-                        className="px-5 py-2 bg-text-primary text-surface-1 hover:opacity-90 active:scale-98 text-xs font-sans font-semibold rounded-full transition-all duration-150 cursor-pointer text-center shadow-xs"
-                      >
-                        Save Changes
-                      </button>
-                      {userName && (
-                        <button
-                          onClick={() => {
-                            localStorage.removeItem('climex_user_name');
-                            setUserName(null);
-                            setUserNameInput('');
-                          }}
-                          className="px-4 py-2 border border-border-hairline text-text-secondary hover:text-text-primary hover:bg-surface-1 text-xs font-sans font-semibold rounded-full transition-all duration-150 cursor-pointer text-center"
-                        >
-                          Clear
+                      <div className="flex items-center gap-2 pt-1">
+                        <button type="submit" className="btn btn-primary h-11 sm:h-9" disabled={!settingsNameDirty}>
+                          Save name
                         </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-surface-2 border border-border-hairline/40 p-4 rounded-2xl flex items-start gap-3 mt-6">
-                  <PhosphorIcon name="info" className="text-base text-status-accent flex-shrink-0 mt-0.5" />
-                  <div>
-                    <h5 className="font-sans font-semibold text-xs text-text-primary">Single source of truth</h5>
-                    <p className="text-[10px] text-text-secondary leading-relaxed mt-0.5">
-                      Changing your display name here instantly syncs with local storage and updates your global greeting header across all active views.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Right Column: Preferences — Span 7 */}
-              <div className="lg:col-span-7 border border-border-hairline rounded-3xl bg-surface-1 p-6 shadow-sm flex flex-col gap-6">
-                <div>
-                  <span className="font-mono text-[10px] text-text-muted uppercase tracking-wider">Preferences</span>
-                  <h3 className="font-sans font-semibold text-base text-text-primary mt-2 mb-1">Dashboard preferences</h3>
-                  <p className="text-xs text-text-secondary">Customize your display formats and automated sync loops</p>
-                </div>
-
-                <div className="divide-y divide-border-hairline">
-                  {/* Row 1: Update frequency */}
-                  <div className="py-4 flex items-center justify-between gap-4 border-b border-border-hairline/40">
-                    <div className="max-w-[70%]">
-                      <p className="font-sans font-semibold text-xs text-text-primary">Update frequency</p>
-                      <p className="text-[10px] text-text-secondary mt-0.5">How often the dashboard data streams refresh automatically</p>
-                    </div>
-                    <select
-                      value={updateFrequency}
-                      onChange={(e) => {
-                        setUpdateFrequency(e.target.value);
-                        localStorage.setItem('climex_update_frequency', e.target.value);
-                      }}
-                      className="bg-surface-2 border border-border-hairline rounded-lg px-3 py-1.5 font-sans text-xs text-text-primary focus:outline-none focus:border-border-strong cursor-pointer"
-                    >
-                      <option value="realtime">Real-time</option>
-                      <option value="minute">Every minute</option>
-                      <option value="5minutes">Every 5 minutes</option>
-                    </select>
-                  </div>
-
-                  {/* Row 2: Temperature units */}
-                  <div className="py-4 flex items-center justify-between gap-4 border-b border-border-hairline/40">
-                    <div className="max-w-[70%]">
-                      <p className="font-sans font-semibold text-xs text-text-primary">Temperature units</p>
-                      <p className="text-[10px] text-text-secondary mt-0.5">Choose Celsius or Fahrenheit for the weather panels</p>
-                    </div>
-                    <select
-                      value={tempUnit}
-                      onChange={(e) => {
-                        setTempUnit(e.target.value);
-                        localStorage.setItem('climex_temp_unit', e.target.value);
-                      }}
-                      className="bg-surface-2 border border-border-hairline rounded-lg px-3 py-1.5 font-sans text-xs text-text-primary focus:outline-none focus:border-border-strong cursor-pointer"
-                    >
-                      <option value="C">Celsius</option>
-                      <option value="F">Fahrenheit</option>
-                    </select>
-                  </div>
-
-                  {/* Row 3: Default currency */}
-                  <div className="py-4 flex items-center justify-between gap-4 border-b border-border-hairline/40">
-                    <div className="max-w-[70%]">
-                      <p className="font-sans font-semibold text-xs text-text-primary">Default currency</p>
-                      <p className="text-[10px] text-text-secondary mt-0.5">The base currency for market indexes and financial metrics</p>
-                    </div>
-                    <select
-                      value={defaultCurrency}
-                      onChange={(e) => {
-                        setDefaultCurrency(e.target.value);
-                        localStorage.setItem('climex_default_currency', e.target.value);
-                      }}
-                      className="bg-surface-2 border border-border-hairline rounded-lg px-3 py-1.5 font-sans text-xs text-text-primary focus:outline-none focus:border-border-strong cursor-pointer"
-                    >
-                      <option value="USD">USD</option>
-                      <option value="EUR">EUR</option>
-                      <option value="PHP">PHP</option>
-                    </select>
-                  </div>
-
-                  {/* Row 4: Price alerts */}
-                  <div className="py-4 flex items-center justify-between gap-4">
-                    <div className="max-w-[70%]">
-                      <p className="font-sans font-semibold text-xs text-text-primary">Price alerts</p>
-                      <p className="text-[10px] text-text-secondary mt-0.5">Receive alerts on rapid market spikes and volatile moves</p>
-                    </div>
-                    <button
-                      onClick={() => {
-                        const val = !priceAlerts;
-                        setPriceAlerts(val);
-                        localStorage.setItem('climex_price_alerts', String(val));
-                      }}
-                      className="flex items-center gap-2 cursor-pointer focus:outline-none"
-                    >
-                      <span className={`px-2.5 py-1 rounded-full font-mono font-bold text-[10px] uppercase transition-all duration-150 ${priceAlerts
-                        ? 'bg-status-success-bg text-status-success'
-                        : 'bg-surface-2 border border-border-hairline text-text-secondary'
-                        }`}>
-                        {priceAlerts ? 'On' : 'Off'}
-                      </span>
-                      {/* Standard Switch visual toggled */}
-                      <div className={`w-8 h-4 rounded-full p-0.5 transition-colors duration-200 ${priceAlerts ? 'bg-status-success' : 'bg-surface-3'}`}>
-                        <div className={`bg-surface-1 w-3 h-3 rounded-full shadow-xs transform transition-transform duration-200 ${priceAlerts ? 'translate-x-4' : 'translate-x-0'}`} />
+                        {userName && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              localStorage.removeItem('climex_user_name');
+                              setUserName(null);
+                              setUserNameInput('');
+                              settingsFlashSaved('name');
+                            }}
+                            className="btn btn-secondary h-11 sm:h-9"
+                          >
+                            Clear
+                          </button>
+                        )}
+                        {settingsNameDirty && (
+                          <span className="text-[13px] text-text-muted ml-1">Unsaved changes</span>
+                        )}
                       </div>
-                    </button>
-                  </div>
+                    </form>
+                  </SettingsSection>
+
+                  {/* Display */}
+                  <SettingsSection
+                    id="settings-section-display"
+                    title="Display"
+                    description="Units and formats used across weather and market panels."
+                    activeOnMobile={settingsSection === 'display'}
+                  >
+                    <SettingsRow
+                      label="Temperature units"
+                      help="Used in weather panels and search results."
+                      saved={settingsSavedKey === 'temp'}
+                    >
+                      <div className="segmented" role="group" aria-label="Temperature units">
+                        {[{ value: 'C', label: 'Celsius (°C)' }, { value: 'F', label: 'Fahrenheit (°F)' }].map(o => (
+                          <button
+                            key={o.value}
+                            type="button"
+                            aria-pressed={tempUnit === o.value}
+                            className="h-9 sm:h-8"
+                            onClick={() => {
+                              setTempUnit(o.value);
+                              localStorage.setItem('climex_temp_unit', o.value);
+                              settingsFlashSaved('temp');
+                            }}
+                          >
+                            {o.label}
+                          </button>
+                        ))}
+                      </div>
+                    </SettingsRow>
+                    <SettingsRow
+                      label="Default currency"
+                      htmlFor="settings-default-currency"
+                      help="Base currency for market indexes and financial metrics."
+                      saved={settingsSavedKey === 'currency'}
+                    >
+                      <SettingsSelect
+                        id="settings-default-currency"
+                        value={defaultCurrency}
+                        onChange={(v) => {
+                          setDefaultCurrency(v);
+                          localStorage.setItem('climex_default_currency', v);
+                          settingsFlashSaved('currency');
+                        }}
+                        options={[
+                          { value: 'USD', label: 'USD — US dollar' },
+                          { value: 'EUR', label: 'EUR — Euro' },
+                          { value: 'PHP', label: 'PHP — Philippine peso' },
+                        ]}
+                      />
+                    </SettingsRow>
+                  </SettingsSection>
+
+                  {/* Data & refresh */}
+                  <SettingsSection
+                    id="settings-section-data"
+                    title="Data & alerts"
+                    description={
+                      <>
+                        Control how often live data refreshes and which alerts you get.{' '}
+                        <a
+                          href="/privacy"
+                          onClick={(e) => navigateToTab('privacy', '/privacy', e)}
+                          className="text-text-primary font-medium underline underline-offset-2 decoration-border-strong hover:decoration-text-primary"
+                        >
+                          How we handle data
+                        </a>
+                      </>
+                    }
+                    activeOnMobile={settingsSection === 'data'}
+                  >
+                    <SettingsRow
+                      label="Update frequency"
+                      htmlFor="settings-update-frequency"
+                      help="How often dashboard data refreshes automatically."
+                      saved={settingsSavedKey === 'frequency'}
+                    >
+                      <SettingsSelect
+                        id="settings-update-frequency"
+                        value={updateFrequency}
+                        onChange={(v) => {
+                          setUpdateFrequency(v);
+                          localStorage.setItem('climex_update_frequency', v);
+                          settingsFlashSaved('frequency');
+                        }}
+                        options={[
+                          { value: 'realtime', label: 'Real-time' },
+                          { value: 'minute', label: 'Every minute' },
+                          { value: '5minutes', label: 'Every 5 minutes' },
+                        ]}
+                      />
+                    </SettingsRow>
+                    <SettingsRow
+                      label="Price alerts"
+                      help="Get alerts for rapid market spikes and volatile moves."
+                      saved={settingsSavedKey === 'alerts'}
+                    >
+                      <SettingsSwitch
+                        id="settings-price-alerts"
+                        label="Price alerts"
+                        checked={priceAlerts}
+                        onChange={(val) => {
+                          setPriceAlerts(val);
+                          localStorage.setItem('climex_price_alerts', String(val));
+                          settingsFlashSaved('alerts');
+                        }}
+                      />
+                    </SettingsRow>
+                  </SettingsSection>
                 </div>
               </div>
-
-            </div>
-          )}
+            );
+          })()}
 
           {/* ==================== TAB 9: INTERNAL ADMIN VIEW ==================== */}
           {activeTab === 'admin' && (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-slide-up" id="admin-tab-view">
 
               {/* Left column info — Span 4 */}
-              <div className="lg:col-span-4 border border-border-hairline rounded-3xl bg-surface-1 p-6 shadow-sm flex flex-col justify-between">
+              <div className="lg:col-span-4 border border-border-hairline rounded-2xl bg-surface-1 p-6 shadow-sm flex flex-col justify-between">
                 <div>
                   <h3 className="font-sans font-semibold text-sm text-text-primary mb-1">Climex Proxy Configuration</h3>
                   <p className="text-xs text-text-secondary mb-6">Centralized settings, caching, and credentials</p>
 
                   <div className="space-y-4 text-xs font-sans">
                     <div className="bg-surface-2 p-3 rounded-xl border border-border-hairline">
-                      <p className="font-mono text-[9px] text-text-secondary uppercase">Proxy Host IP</p>
+                      <p className="text-[13px] text-text-secondary font-medium">Proxy Host IP</p>
                       <p className="font-mono text-text-primary mt-0.5">0.0.0.0:3000 (Local Container Routing)</p>
                     </div>
 
                     <div className="bg-surface-2 p-3 rounded-xl border border-border-hairline">
-                      <p className="font-mono text-[9px] text-text-secondary uppercase">SWR cache TTL</p>
+                      <p className="text-[13px] text-text-secondary font-medium">SWR cache TTL</p>
                       <p className="text-text-primary font-medium mt-0.5">45s (Crypto) | 10m (Weather) | 1hr (Currency)</p>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 text-[10px] font-mono text-text-secondary mt-8">
+                <div className="flex items-center gap-2 text-[11.5px] font-mono text-text-secondary mt-8">
                   <PhosphorIcon name="hard-drive" className="text-sm text-status-accent" />
                   <span>Memory Cache Size: 320 KB</span>
                 </div>
               </div>
 
               {/* Right column settings toggles — Span 8 */}
-              <div className="lg:col-span-8 border border-border-hairline rounded-3xl bg-surface-1 p-6 shadow-sm flex flex-col gap-6">
+              <div className="lg:col-span-8 border border-border-hairline rounded-2xl bg-surface-1 p-6 shadow-sm flex flex-col gap-6">
                 <h3 className="font-sans font-semibold text-sm text-text-primary border-b border-border-hairline pb-3">Feature Toggles</h3>
 
                 <div className="space-y-4 text-xs">
@@ -5556,9 +5529,9 @@ export default function App() {
                   <div className="flex items-center justify-between p-3.5 bg-surface-2 rounded-2xl border border-border-hairline/40">
                     <div>
                       <p className="font-sans font-semibold text-xs text-text-primary">Background Refresh Stream</p>
-                      <p className="text-[10px] text-text-secondary mt-0.5">Automatically query proxy nodes in SWR loop</p>
+                      <p className="text-[11.5px] text-text-secondary mt-0.5">Automatically query proxy nodes in SWR loop</p>
                     </div>
-                    <span className="px-2 py-0.5 rounded bg-status-success-bg text-status-success font-mono font-bold text-[10px] uppercase">
+                    <span className="px-2 py-0.5 rounded bg-status-success-bg text-status-success font-mono font-bold text-[11.5px] uppercase">
                       Active
                     </span>
                   </div>
@@ -5567,9 +5540,9 @@ export default function App() {
                   <div className="flex items-center justify-between p-3.5 bg-surface-2 rounded-2xl border border-border-hairline/40">
                     <div>
                       <p className="font-sans font-semibold text-xs text-text-primary">Dynamic Offline Fallbacks</p>
-                      <p className="text-[10px] text-text-secondary mt-0.5">Serve high-fidelity dynamic mock indexes during network timeouts</p>
+                      <p className="text-[11.5px] text-text-secondary mt-0.5">Serve high-fidelity dynamic mock indexes during network timeouts</p>
                     </div>
-                    <span className="px-2 py-0.5 rounded bg-status-success-bg text-status-success font-mono font-bold text-[10px] uppercase">
+                    <span className="px-2 py-0.5 rounded bg-status-success-bg text-status-success font-mono font-bold text-[11.5px] uppercase">
                       Enabled
                     </span>
                   </div>
@@ -5578,9 +5551,9 @@ export default function App() {
                   <div className="flex items-center justify-between p-3.5 bg-surface-2 rounded-2xl border border-border-hairline/40">
                     <div>
                       <p className="font-sans font-semibold text-xs text-text-primary">Rate-Limit Buffer</p>
-                      <p className="text-[10px] text-text-secondary mt-0.5">Restrict client poll drift requests within safe limits</p>
+                      <p className="text-[11.5px] text-text-secondary mt-0.5">Restrict client poll drift requests within safe limits</p>
                     </div>
-                    <span className="px-2 py-0.5 rounded bg-status-accent-bg text-status-accent font-mono font-bold text-[10px] uppercase">
+                    <span className="px-2 py-0.5 rounded bg-status-accent-bg text-status-accent font-mono font-bold text-[11.5px] uppercase">
                       Strictest
                     </span>
                   </div>
@@ -5590,18 +5563,34 @@ export default function App() {
             </div>
           )}
 
+          {/* ==================== TAB 10: PRIVACY POLICY VIEW ==================== */}
+          {activeTab === 'privacy' && (
+            <PrivacyPolicy onBack={(e) => navigateToTab('dashboard', '/', e)} />
+          )}
+
+          </>
+          )}
+
           {/* Footer branding */}
-          <footer className="border-t border-border-hairline mt-12 py-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs font-sans text-text-secondary" id="climex-footer">
-            <p>&copy; 2026 Climex. All rights reserved.</p>
-            <div className="flex items-center gap-4">
+          <footer className="border-t border-border-hairline mt-8 sm:mt-12 py-6 px-3 sm:px-4 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4 text-xs font-sans text-text-secondary" id="climex-footer">
+            <p className="text-center sm:text-left text-xs text-text-secondary">&copy; 2026 Climex. All rights reserved.</p>
+            <div className="flex flex-wrap items-center justify-center sm:justify-end gap-x-2.5 sm:gap-x-4 gap-y-1.5 text-xs text-center">
+              <a
+                href="/privacy"
+                onClick={(e) => navigateToTab('privacy', '/privacy', e)}
+                className="hover:text-text-primary transition-colors font-sans font-medium cursor-pointer whitespace-nowrap"
+              >
+                Privacy
+              </a>
+              <span className="text-text-muted/60 text-[11.5px] shrink-0 select-none">•</span>
               <a
                 href="mailto:support@climex-analytics.com"
-                className="hover:text-text-primary transition-colors flex items-center gap-1 font-sans font-medium"
+                className="hover:text-text-primary transition-colors flex items-center gap-1 font-sans font-medium whitespace-nowrap"
               >
                 Support & Resources
               </a>
-              <span>•</span>
-              <span className="font-sans font-medium text-[11px]">Climex Dashboard v1</span>
+              <span className="text-text-muted/60 text-[11.5px] shrink-0 select-none">•</span>
+              <span className="font-sans font-medium text-[12.5px] whitespace-nowrap text-text-muted">Climex Dashboard v1</span>
             </div>
           </footer>
 

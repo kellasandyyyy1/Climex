@@ -196,7 +196,15 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, {
+      setHeaders(res, filePath) {
+        // The service worker and manifest must be revalidated so updates are picked up
+        if (/[\\/](sw\.js|registerSW\.js|manifest\.webmanifest|index\.html|offline\.html)$/.test(filePath)) {
+          res.setHeader('Cache-Control', 'no-cache');
+        }
+        if (filePath.endsWith('.webmanifest')) res.setHeader('Content-Type', 'application/manifest+json');
+      },
+    }));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });

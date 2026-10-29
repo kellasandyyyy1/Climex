@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Clock } from '@phosphor-icons/react';
+import { Clock } from './Icon';
 
 interface SyncStatusWidgetProps {
   lastSynced: Date | null;
