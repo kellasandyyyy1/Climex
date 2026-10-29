@@ -4,230 +4,209 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { CaretLeft, CaretDown, CheckCircle, EnvelopeSimple } from './Icon';
+import { CaretLeft, CaretDown, CheckCircle, EnvelopeSimple, Info } from './Icon';
+import { PRIVACY_POLICY, type PolicyBlock } from '../content/privacyPolicy';
 
-const PRIVACY_CONTACT = 'support@climex-analytics.com';
+/**
+ * Privacy policy page. The text lives in src/content/privacyPolicy.ts; this file only lays it out:
+ * a numbered, sticky table of contents on desktop and a numbered accordion on mobile.
+ */
 
-const PRIVACY_KEY_POINTS = [
-  'We never sell, share or advertise with your data.',
-  'Your location is used only to fetch local weather and air quality, and is never stored on our servers.',
-  'Preferences such as units, currency and your display name stay in your browser.',
-  'No cross-site tracking. Location access is optional and can be revoked anytime.',
-];
+const { sections, contactEmail, lastUpdated } = PRIVACY_POLICY;
 
-const PRIVACY_SECTIONS: Array<{ id: string; title: string; summary: string; body: React.ReactNode }> = [
-  {
-    id: 'privacy-overview',
-    title: 'Our approach to data',
-    summary: 'Client-first, minimal data, explicit consent.',
-    body: (
-      <p>
-        Climex is built as a client-side analytics and monitoring dashboard. We prioritize a minimal data footprint, zero
-        cross-site tracking, and explicit consent for every interactive capability.
-      </p>
-    ),
-  },
-  {
-    id: 'privacy-location',
-    title: 'Location data',
-    summary: 'Used only with your permission, never stored or sold.',
-    body: (
-      <>
-        <p>
-          Climex requests your device location, with your permission, to display accurate local weather and air quality
-          readings.
-        </p>
-        <ul className="mt-3 space-y-2 list-disc pl-5 marker:text-text-muted">
-          <li>We only use it to fetch data from our weather and air quality providers (e.g. Open-Meteo, OpenAQ).</li>
-          <li>Your location is not stored on our servers.</li>
-          <li>
-            So the installed app doesn't ask again, your approximate position (rounded to two decimal places, about 1 km) and
-            the nearest monitored city are saved on this device only.
-          </li>
-          <li>Your location is not shared, sold, or used for advertising.</li>
-          <li>You can decline location access and search for a city manually instead.</li>
-          <li>You can revoke location permission anytime in your browser or device settings.</li>
+/** Pulls the "short version" call-out out of the overview so it can lead the page. */
+const SHORT_VERSION = sections
+  .flatMap(s => s.blocks)
+  .find((b): b is Extract<PolicyBlock, { kind: 'callout' }> => b.kind === 'callout' && b.title === 'The short version');
+
+function Block({ block, section, index }: { block: PolicyBlock; section: number; index: number }) {
+  switch (block.kind) {
+    case 'text':
+      return <p>{block.text}</p>;
+
+    case 'list':
+      return (
+        <ul className="space-y-2 list-disc pl-5 marker:text-text-muted">
+          {block.items.map((item, i) => (
+            <li key={i}>{item}</li>
+          ))}
         </ul>
-      </>
-    ),
-  },
-  {
-    id: 'privacy-providers',
-    title: 'Third-party data providers',
-    summary: 'Public APIs, without personal identifiers.',
-    body: (
-      <p>
-        To deliver real-time market prices, exchange rates and air quality readings, Climex connects to verified public
-        APIs (CoinGecko, Open-Meteo, Frankfurter, REST Countries). Requests are made directly or through our server proxy
-        without sending personal identifiers.
-      </p>
-    ),
-  },
-  {
-    id: 'privacy-storage',
-    title: 'Local storage and settings',
-    summary: 'Your preferences live only in this browser.',
-    body: (
-      <p>
-        Your preferences, including temperature unit (°C/°F), base currency, price alert setting, display name and saved
-        profile location, are stored only in your browser's local storage (<code className="text-[13px] px-1 py-0.5 rounded bg-surface-2 border border-border-hairline">localStorage</code>).
-        You can clear this data at any time with your browser's site-data tools.
-      </p>
-    ),
-  },
-  {
-    id: 'privacy-offline',
-    title: 'Offline storage and the installed app',
-    summary: 'Recent data is saved on your device so Climex works offline.',
-    body: (
-      <>
-        <p>
-          When you use Climex in a browser that supports it, or install it as an app, a copy of recent data is kept on your
-          device so pages load quickly and still work without a connection.
-        </p>
-        <ul className="mt-3 space-y-2 list-disc pl-5 marker:text-text-muted">
-          <li>
-            <span className="font-medium text-text-primary">What's saved:</span> market prices (kept up to 2 minutes before it's
-            marked stale), weather (15 minutes), air quality (30 minutes), exchange rates (1 hour), country statistics (30
-            days), recent alerts (1 day), plus flags, coin logos and fonts (up to a year). The most recent copy of each is also
-            kept so the dashboard can show your last data offline, labelled with when it was saved.
-          </li>
-          <li>
-            <span className="font-medium text-text-primary">Saved location:</span> your approximate position, rounded to two
-            decimal places (about 1 km), and the nearest monitored city.
-          </li>
-          <li>
-            <span className="font-medium text-text-primary">Where it lives:</span> only on your device. None of it is sent back to
-            Climex or shared with anyone.
-          </li>
-          <li>
-            <span className="font-medium text-text-primary">How to remove it:</span> clear this site's data in your browser's
-            settings (often under Privacy → Site data), or uninstall the Climex app. Both delete the saved data and location.
-          </li>
-        </ul>
-      </>
-    ),
-  },
-  {
-    id: 'privacy-contact',
-    title: 'Questions and contact',
-    summary: 'Email us about anything privacy-related.',
-    body: (
-      <p>
-        If you have questions about how we handle data, contact us at{' '}
-        <a href={`mailto:${PRIVACY_CONTACT}`} className="text-text-primary font-medium underline underline-offset-2 decoration-border-strong hover:decoration-text-primary">
-          {PRIVACY_CONTACT}
-        </a>
-        .
-      </p>
-    ),
-  },
-];
+      );
 
-/** Privacy policy as a readable document: key points, sticky table of contents (desktop), accordion (mobile). */
+    case 'subsection':
+      return (
+        <div>
+          <h3 className="text-[15px] font-semibold text-text-primary tracking-tight mb-2">
+            <span className="text-text-muted tabular-nums mr-1.5">{section}.{index}</span>
+            {block.title}
+          </h3>
+          <div className="flex flex-col gap-3">
+            {block.blocks.map((child, i) => (
+              <React.Fragment key={i}>
+                <Block block={child} section={section} index={i + 1} />
+              </React.Fragment>
+            ))}
+          </div>
+        </div>
+      );
+
+    case 'providers':
+      return (
+        <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          {block.items.map(p => (
+            <li key={p.name}>
+              <a
+                href={p.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="block h-full rounded-lg border border-border-hairline bg-surface-1 px-3.5 py-3 hover:border-border-strong transition-colors"
+              >
+                <span className="block text-[12px] text-text-muted">{p.category}</span>
+                <span className="block text-[14px] font-semibold text-text-primary mt-0.5">{p.name} ↗</span>
+                <span className="block text-[13px] text-text-secondary leading-snug mt-1">{p.purpose}</span>
+              </a>
+            </li>
+          ))}
+        </ul>
+      );
+
+    case 'callout': {
+      if (block === SHORT_VERSION) return null; // shown at the top of the page instead
+      const Icon = block.tone === 'success' ? CheckCircle : Info;
+      return (
+        <div className="flex items-start gap-3 rounded-lg bg-surface-2 border border-border-hairline px-4 py-3">
+          <Icon size={18} className={`shrink-0 mt-0.5 ${block.tone === 'success' ? 'text-status-success' : 'text-status-info'}`} aria-hidden="true" />
+          <div>
+            <p className="text-[14px] font-semibold text-text-primary">{block.title}</p>
+            <p className="text-[14px] text-text-secondary leading-relaxed mt-0.5">{block.text}</p>
+          </div>
+        </div>
+      );
+    }
+  }
+}
+
+function SectionBody({ index }: { index: number }) {
+  // Subsections are numbered by their position among subsections (2.1, 2.2 …), not among all blocks
+  let sub = 0;
+  return (
+    <div className="flex flex-col gap-4">
+      {sections[index].blocks.map((b, i) => (
+        <React.Fragment key={i}>
+          <Block block={b} section={index + 1} index={b.kind === 'subsection' ? ++sub : 0} />
+        </React.Fragment>
+      ))}
+      {sections[index].id === 'contact' && (
+        <p>
+          <a href={`mailto:${contactEmail}`} className="text-text-primary font-medium underline underline-offset-2 decoration-border-strong hover:decoration-text-primary">
+            {contactEmail}
+          </a>
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function PrivacyPolicy({ onBack }: { onBack: (e: React.MouseEvent) => void }) {
-  const [privacyActiveId, setPrivacyActiveId] = useState(PRIVACY_SECTIONS[0].id);
+  const [activeId, setActiveId] = useState(sections[0].id);
 
   // Scroll-spy for the desktop table of contents
   useEffect(() => {
     if (typeof IntersectionObserver === 'undefined') return;
     const observer = new IntersectionObserver(
-      (entries) => {
+      entries => {
         const visible = entries.filter(e => e.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-        if (visible[0]) setPrivacyActiveId(visible[0].target.id.replace(/-doc$/, ''));
+        if (visible[0]) setActiveId(visible[0].target.id.replace(/-doc$/, ''));
       },
       { rootMargin: '-96px 0px -60% 0px' }
     );
-    PRIVACY_SECTIONS.forEach(s => {
+    sections.forEach(s => {
       const el = document.getElementById(`${s.id}-doc`);
       if (el) observer.observe(el);
     });
     return () => observer.disconnect();
   }, []);
 
-  const contactButton = (
-    <a href={`mailto:${PRIVACY_CONTACT}`} className="btn btn-primary h-11 md:h-9">
-      <EnvelopeSimple size={16} aria-hidden="true" />
-      Contact support
-    </a>
-  );
-
   return (
     <div className="animate-slide-up w-full" id="privacy-policy-view">
-      {/* Top bar: back link + effective date */}
+      {/* Top bar: back link + last updated */}
       <div className="mb-4 md:mb-6 flex items-center justify-between gap-3">
         <a href="/" onClick={onBack} className="btn btn-ghost -ml-3 h-11 md:h-9">
           <CaretLeft size={16} aria-hidden="true" />
           Back to dashboard
         </a>
-        <span className="text-[13px] text-text-muted">Effective August 2026</span>
+        <span className="text-[13px] text-text-muted">Last updated {lastUpdated}</span>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-[200px_minmax(0,1fr)] lg:grid-cols-[220px_minmax(0,1fr)] gap-6 md:gap-10">
-        {/* Desktop: sticky table of contents */}
+      <div className="grid grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)] lg:grid-cols-[240px_minmax(0,1fr)] gap-6 md:gap-10">
+        {/* Desktop: sticky, numbered table of contents */}
         <nav className="hidden md:block" aria-label="On this page">
           <div className="sticky top-24">
-            <p className="eyebrow mb-2">On this page</p>
-            <ul className="flex flex-col gap-0.5 border-l border-border-hairline">
-              {PRIVACY_SECTIONS.map(s => {
-                const active = privacyActiveId === s.id;
+            <p className="eyebrow mb-2">Contents</p>
+            <ol className="flex flex-col gap-0.5 border-l border-border-hairline">
+              {sections.map((s, i) => {
+                const active = activeId === s.id;
                 return (
                   <li key={s.id}>
                     <a
                       href={`#${s.id}-doc`}
-                      onClick={(e) => {
+                      onClick={e => {
                         e.preventDefault();
                         document.getElementById(`${s.id}-doc`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                        setPrivacyActiveId(s.id);
+                        setActiveId(s.id);
                       }}
                       aria-current={active ? 'location' : undefined}
-                      className={`block -ml-px pl-3 py-1.5 border-l-2 text-[14px] leading-snug transition-colors ${active ? 'border-text-primary text-text-primary font-medium' : 'border-transparent text-text-secondary hover:text-text-primary'}`}
+                      className={`flex gap-2 -ml-px pl-3 py-1.5 border-l-2 text-[14px] leading-snug transition-colors ${active ? 'border-text-primary text-text-primary font-medium' : 'border-transparent text-text-secondary hover:text-text-primary'}`}
                     >
-                      {s.title}
+                      <span className="tabular-nums text-text-muted w-5 shrink-0">{i + 1}.</span>
+                      <span>{s.title}</span>
                     </a>
                   </li>
                 );
               })}
-            </ul>
+            </ol>
           </div>
         </nav>
 
-        <div className="min-w-0 max-w-[70ch]">
-          {/* Key points summary */}
-          <section className="card card-pad" aria-labelledby="privacy-key-points-title">
-            <h2 id="privacy-key-points-title" className="card-title">The short version</h2>
-            <ul className="mt-3 flex flex-col gap-2.5">
-              {PRIVACY_KEY_POINTS.map(p => (
-                <li key={p} className="flex items-start gap-2.5 text-[14px] text-text-secondary leading-relaxed">
-                  <CheckCircle size={18} weight="fill" className="text-status-success shrink-0 mt-0.5" aria-hidden="true" />
-                  <span>{p}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
+        <div className="min-w-0 max-w-[72ch]">
+          {/* Short version */}
+          {SHORT_VERSION && (
+            <section className="card card-pad flex items-start gap-3" aria-labelledby="privacy-short-version">
+              <CheckCircle size={20} weight="fill" className="text-status-success shrink-0 mt-0.5" aria-hidden="true" />
+              <div>
+                <h2 id="privacy-short-version" className="card-title">{SHORT_VERSION.title}</h2>
+                <p className="text-[14px] text-text-secondary leading-relaxed mt-1">{SHORT_VERSION.text}</p>
+              </div>
+            </section>
+          )}
 
-          {/* Mobile: sections as an accordion */}
+          {/* Mobile: numbered accordion */}
           <div className="md:hidden mt-4 card divide-y divide-border-hairline overflow-hidden">
-            {PRIVACY_SECTIONS.map(s => (
+            {sections.map((s, i) => (
               <details key={s.id} id={s.id} className="group">
-                <summary className="flex items-center justify-between gap-3 min-h-[56px] px-4 py-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
-                  <span className="min-w-0">
-                    <span className="block text-[15px] font-medium text-text-primary">{s.title}</span>
-                    <span className="block text-[13px] text-text-muted mt-0.5">{s.summary}</span>
+                <summary className="flex items-center justify-between gap-3 min-h-[52px] px-4 py-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+                  <span className="flex gap-2 text-[15px] font-medium text-text-primary">
+                    <span className="tabular-nums text-text-muted w-5 shrink-0">{i + 1}.</span>
+                    {s.title}
                   </span>
                   <CaretDown size={16} className="shrink-0 text-text-muted transition-transform group-open:rotate-180" aria-hidden="true" />
                 </summary>
-                <div className="px-4 pb-4 text-[15px] text-text-secondary leading-relaxed">{s.body}</div>
+                <div className="px-4 pb-4 text-[15px] text-text-secondary leading-relaxed">
+                  <SectionBody index={i} />
+                </div>
               </details>
             ))}
           </div>
 
           {/* Desktop: full document */}
           <article className="hidden md:block mt-10 text-[15px] text-text-secondary leading-[1.7]">
-            {PRIVACY_SECTIONS.map((s, i) => (
+            {sections.map((s, i) => (
               <section key={s.id} id={`${s.id}-doc`} className={`scroll-mt-24 ${i > 0 ? 'mt-10 pt-10 border-t border-border-hairline' : ''}`}>
-                <h2 className="text-[18px] font-semibold text-text-primary tracking-tight mb-3">{s.title}</h2>
-                {s.body}
+                <h2 className="text-[19px] font-semibold text-text-primary tracking-tight mb-4">
+                  <span className="text-text-muted tabular-nums mr-2">{i + 1}.</span>
+                  {s.title}
+                </h2>
+                <SectionBody index={i} />
               </section>
             ))}
           </article>
@@ -236,9 +215,12 @@ export default function PrivacyPolicy({ onBack }: { onBack: (e: React.MouseEvent
           <div className="mt-6 md:mt-10 card card-pad flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <p className="text-[14px] font-medium text-text-primary">Questions about your data?</p>
-              <p className="text-[13px] text-text-secondary mt-0.5">Email {PRIVACY_CONTACT}</p>
+              <p className="text-[13px] text-text-secondary mt-0.5">Email {contactEmail}</p>
             </div>
-            {contactButton}
+            <a href={`mailto:${contactEmail}`} className="btn btn-primary h-11 md:h-9">
+              <EnvelopeSimple size={16} aria-hidden="true" />
+              Contact support
+            </a>
           </div>
         </div>
       </div>

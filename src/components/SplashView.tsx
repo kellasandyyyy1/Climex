@@ -4,13 +4,16 @@
  */
 
 import React from 'react';
-import { ArrowRight } from './Icon';
+import { ArrowRight, MapPin } from './Icon';
 import { motion } from 'motion/react';
 import StatusBadge, { aqiTone } from './StatusBadge';
 import Wordmark from './Wordmark';
+import { pathForTab, isModifiedClick } from '../lib/routes';
 
 interface SplashViewProps {
   onLaunch: () => void;
+  /** Opens the privacy policy in-app (plain clicks only). */
+  onOpenPrivacy?: () => void;
 }
 
 interface LiveSnapshot {
@@ -139,7 +142,7 @@ function LiveStrip({ snap, status, retry }: { snap: LiveSnapshot | null; status:
   );
 }
 
-export default function SplashView({ onLaunch }: SplashViewProps) {
+export default function SplashView({ onLaunch, onOpenPrivacy }: SplashViewProps) {
   const { snap, status, retry } = useLiveSnapshot();
   const scrollToHow = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -267,6 +270,22 @@ export default function SplashView({ onLaunch }: SplashViewProps) {
               className="font-medium text-text-secondary underline decoration-border-strong underline-offset-2 hover:text-text-primary transition-colors"
             >
               andrei
+            </a>
+          </span>
+          {/* Shown here because the browser location prompt appears on this screen */}
+          <span className="flex items-center gap-1.5">
+            <MapPin size={13} className="shrink-0" />
+            Asks for your location —{' '}
+            <a
+              href={pathForTab('privacy')}
+              onClick={(e) => {
+                if (!onOpenPrivacy || isModifiedClick(e)) return;
+                e.preventDefault();
+                onOpenPrivacy();
+              }}
+              className="font-medium text-text-secondary underline decoration-border-strong underline-offset-2 hover:text-text-primary transition-colors"
+            >
+              privacy policy
             </a>
           </span>
         </div>

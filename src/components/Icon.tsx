@@ -36,6 +36,7 @@ import {
   Database as LDatabase,
   Download as LDownload,
   Mail,
+  MapPin as LMapPin,
   FileText as LFileText,
   Settings,
   Globe as LGlobe,
@@ -140,6 +141,7 @@ export const House = polaris(LHouse, 'House');
 export const Info = polaris(LInfo, 'Info');
 export const List = polaris(Menu, 'List');
 export const MagnifyingGlass = polaris(Search, 'MagnifyingGlass');
+export const MapPin = polaris(LMapPin, 'MapPin');
 export const Minus = polaris(LMinus, 'Minus');
 export const Moon = polaris(LMoon, 'Moon');
 export const Pencil = polaris(LPencil, 'Pencil');

@@ -1287,6 +1287,7 @@ export default function App() {
     return toRate / fromRate;
   }, [data?.currency]);
 
+
   if (!showDashboard) {
     return (
       <SplashView
@@ -1294,6 +1295,7 @@ export default function App() {
           localStorage.setItem('climex_name_prompt_dismissed', 'true');
           setActiveTab('dashboard');
         }}
+        onOpenPrivacy={() => setActiveTab('privacy')}
       />
     );
   }
@@ -5381,9 +5383,12 @@ export default function App() {
                   <SettingsSection
                     id="settings-section-display"
                     title="Display"
-                    description="Units and formats used across weather and market panels."
+                    description="Theme, units and formats used across weather and market panels."
                     activeOnMobile={settingsSection === 'display'}
                   >
+                    <SettingsRow label="Appearance" help="Switch between the light and dark theme.">
+                      <ThemeToggle />
+                    </SettingsRow>
                     <SettingsRow
                       label="Temperature units"
                       help="Used in weather panels and search results."
