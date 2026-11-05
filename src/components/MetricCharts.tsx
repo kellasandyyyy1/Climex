@@ -317,7 +317,7 @@ export function CountryGrowthChart({ data, type, countryName, flatStroke, height
   const valueKey = type === 'gdp' ? 'gdp' : 'population';
   // Unique gradient id per instance (mobile + desktop charts can coexist in the DOM)
   const countryGradientId = `countryGrowthFill-${React.useId().replace(/:/g, '')}`;
-  const countryTick = { fill: 'var(--ink-soft)', fontSize: 12, fontFamily: 'var(--font-sans, Inter, sans-serif)' };
+  const countryTick = { fill: 'var(--ink-soft)', fontSize: 12, fontFamily: 'var(--font-sans)' };
   // Oldest year on the left so the trend reads left-to-right
   const series = [...data].sort((a, b) => Number(a.year) - Number(b.year));
   const formatYAxis = (val: number) => {

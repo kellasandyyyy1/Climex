@@ -2113,7 +2113,7 @@ export default function App() {
                 </nav>
               )}
 
-              <h1 className="font-display font-normal text-2xl md:text-[32px] tracking-tight text-text-primary leading-tight">
+              <h1 className="font-display font-bold text-2xl md:text-[32px] tracking-tight text-text-primary leading-tight">
                 {activeTab === 'dashboard' ? (
                   <>
                     {getGreeting()}, <span className="font-medium">{userName || 'trader'}</span>

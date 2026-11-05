@@ -180,7 +180,7 @@ export default function SplashView({ onLaunch, onOpenPrivacy }: SplashViewProps)
               variants={rise}
               initial="hidden"
               animate="show"
-              className="font-display font-normal text-[44px] leading-[1.02] sm:text-[56px] md:text-[68px] tracking-[-0.025em] mt-4"
+              className="font-display font-bold text-[44px] leading-[1.02] sm:text-[56px] md:text-[68px] tracking-[-0.025em] mt-4"
             >
               Live data,
               <br />
@@ -228,12 +228,12 @@ export default function SplashView({ onLaunch, onOpenPrivacy }: SplashViewProps)
             <div className="grid md:grid-cols-[minmax(0,320px)_minmax(0,1fr)] gap-8 md:gap-12 lg:gap-16">
               <div>
                 <p className="eyebrow">How it works</p>
-                <h2 className="font-display font-normal text-[30px] md:text-[34px] leading-tight tracking-[-0.02em] mt-3 text-balance">Three steps, no setup.</h2>
+                <h2 className="font-display font-semibold text-[30px] md:text-[34px] leading-tight tracking-[-0.02em] mt-3 text-balance">Three steps, no setup.</h2>
               </div>
               <ol className="grid sm:grid-cols-3 gap-px bg-border-hairline rounded-2xl overflow-hidden border border-border-hairline">
                 {STEPS.map((step, i) => (
                   <li key={step.title} className="bg-surface-1 p-5 md:p-6 flex flex-row sm:flex-col gap-4 sm:gap-6">
-                    <span className="font-display text-[28px] md:text-[34px] leading-none text-accent tabular-nums shrink-0 w-7 sm:w-auto">{i + 1}</span>
+                    <span className="font-display font-semibold text-[28px] md:text-[34px] leading-none text-accent tabular-nums shrink-0 w-7 sm:w-auto">{i + 1}</span>
                     <div>
                       <p className="text-[15px] font-semibold text-text-primary leading-snug">{step.title}</p>
                       <p className="text-[14px] text-text-secondary leading-relaxed mt-1.5">{step.body}</p>
@@ -264,7 +264,7 @@ export default function SplashView({ onLaunch, onOpenPrivacy }: SplashViewProps)
           <span>
             Developed by{' '}
             <a
-              href="https://seb.kelas.site"
+              href="https://kellasandrei.xyz"
               target="_blank"
               rel="noopener noreferrer"
               className="font-medium text-text-secondary underline decoration-border-strong underline-offset-2 hover:text-text-primary transition-colors"

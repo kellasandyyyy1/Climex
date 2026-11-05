@@ -1,11 +1,12 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&family=Source+Serif+4:opsz,wght@8..60,400..600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&display=swap');
 @import "tailwindcss";
 
 :root {
-  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-display: 'Source Serif 4', ui-serif, Georgia, 'Times New Roman', serif;
-  /* Numeric/label text uses Inter with tabular figures for readability */
-  --font-mono: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  /* iOS system fonts (SF Pro) on Apple devices; Inter is the closest match elsewhere */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro', 'Inter', 'Helvetica Neue', 'Segoe UI', system-ui, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro', 'Inter', 'Helvetica Neue', 'Segoe UI', system-ui, sans-serif;
+  /* Numeric/label text uses the same system stack with tabular figures for readability */
+  --font-mono: var(--font-sans);
 
   /* Basic tokens */
   --bg-base: #F4F3EE;
@@ -56,18 +57,25 @@
   --blue: #2463A8;
 
   /* Badge tones (status badges) */
-  --badge-success-bg: #E3EEE2;
-  --badge-success-fg: #2E5B33;
-  --badge-attention-bg: #F4EACB;
-  --badge-attention-fg: #6A5112;
-  --badge-warning-bg: #F6E2CF;
-  --badge-warning-fg: #8A4416;
-  --badge-critical-bg: #F5DFDA;
-  --badge-critical-fg: #8C2F23;
-  --badge-info-bg: #E2EAF0;
-  --badge-info-fg: #2B5272;
-  --badge-neutral-bg: #ECE9E1;
-  --badge-neutral-fg: #57534A;
+  /* Soft tinted pill + saturated dot with a faint halo */
+  --badge-success-bg: #F0FAE6;
+  --badge-success-fg: #4D8B12;
+  --badge-success-dot: #6CC024;
+  --badge-attention-bg: #FEF8E3;
+  --badge-attention-fg: #9A7300;
+  --badge-attention-dot: #F5B90B;
+  --badge-warning-bg: #FFF4E5;
+  --badge-warning-fg: #C26A06;
+  --badge-warning-dot: #F59E0B;
+  --badge-critical-bg: #FEEEF0;
+  --badge-critical-fg: #D9364C;
+  --badge-critical-dot: #F0435A;
+  --badge-info-bg: #EEF0FE;
+  --badge-info-fg: #5458DA;
+  --badge-info-dot: #6366F1;
+  --badge-neutral-bg: #F3F5F8;
+  --badge-neutral-fg: #5E6B7D;
+  --badge-neutral-dot: #64748B;
 
   /* Card elevation */
   --card-shadow: 0 1px 0 0 rgb(26 25 21 / 0.05), 0 1px 3px 0 rgb(26 25 21 / 0.04);
@@ -108,18 +116,24 @@
   --orange: #E39557;
   --blue: #84AEE0;
 
-  --badge-success-bg: #1F3223;
-  --badge-success-fg: #9FD3A6;
-  --badge-attention-bg: #383019;
-  --badge-attention-fg: #EBCB7A;
-  --badge-warning-bg: #3C2A1B;
-  --badge-warning-fg: #F0B17F;
-  --badge-critical-bg: #3E2320;
-  --badge-critical-fg: #F0A69C;
-  --badge-info-bg: #1C2A35;
-  --badge-info-fg: #A0C4E2;
-  --badge-neutral-bg: #34332E;
-  --badge-neutral-fg: #C9C6BC;
+  --badge-success-bg: rgb(108 192 36 / 0.14);
+  --badge-success-fg: #A3E06A;
+  --badge-success-dot: #84D43C;
+  --badge-attention-bg: rgb(245 185 11 / 0.14);
+  --badge-attention-fg: #F7D35C;
+  --badge-attention-dot: #F5C02B;
+  --badge-warning-bg: rgb(245 158 11 / 0.15);
+  --badge-warning-fg: #FBBF5E;
+  --badge-warning-dot: #F7A936;
+  --badge-critical-bg: rgb(240 67 90 / 0.16);
+  --badge-critical-fg: #FF8F9E;
+  --badge-critical-dot: #F5596D;
+  --badge-info-bg: rgb(99 102 241 / 0.18);
+  --badge-info-fg: #A9ABFA;
+  --badge-info-dot: #8285F6;
+  --badge-neutral-bg: rgb(148 163 184 / 0.14);
+  --badge-neutral-fg: #B4BECB;
+  --badge-neutral-dot: #94A3B8;
 
   --card-shadow: 0 1px 0 0 rgb(0 0 0 / 0.25), 0 1px 3px 0 rgb(0 0 0 / 0.2);
 }
@@ -198,6 +212,7 @@ body {
 }
 
 .font-display {
+  font-family: var(--font-display);
   font-optical-sizing: auto;
   letter-spacing: -0.015em;
 }
